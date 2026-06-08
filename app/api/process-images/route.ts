@@ -84,12 +84,12 @@ BẮT BUỘC: Kết quả đầu ra phải là một JSON **Array** (mảng). M�
 === QUAN TRỌNG: LOGIC TÁCH DÒNG THEO LOẠI TIỀN ===
 
 **KỊCH BẢN 1: HÓA ĐƠN VND / NỘI ĐỊA** (Shopee, Lazada, Tiki, hóa đơn Việt Nam):
-- NẾU có nhiều sản phẩm KHÁC NHAU (VD: Nhựa Đen x1, Nhựa Trắng x1) → BẮT BUỘC tách thành Object riêng cho TỪNG sản phẩm.
-- NẾU chỉ có 1 sản phẩm → 1 Object duy nhất.
-- TUYỆT ĐỐI KHÔNG tạo Object riêng cho Voucher, Giảm giá, hay Phí ship.
-- Mỗi Object: DienGiai = tên sản phẩm cụ thể, SoLuongHang = số lượng CỦA RIÊNG sản phẩm đó.
-- SoTienGoc: GHI GIÁ TRỊ "THÀNH TIỀN" CUỐI CÙNG (tổng thanh toán cuối) — cùng giá trị cho MỌI object trong bill. Backend sẽ tự chia đều theo tỷ lệ số lượng.
-- Ví dụ: Bill 566.100đ gồm Nhựa Đen x1, Nhựa Trắng x1 → 2 Object: [{DienGiai:"Nhựa Đen", SoLuongHang:"1", SoTienGoc:"566100"}, {DienGiai:"Nhựa Trắng", SoLuongHang:"1", SoTienGoc:"566100"}].
+- Mỗi sản phẩm KHÁC NHAU → MỘT Object riêng. Chỉ có 1 sản phẩm → 1 Object.
+- **SoTienGoc của MỖI Object = GIÁ RIÊNG của dòng đó** (số tiền "Thành tiền" hiển thị NGAY CẠNH sản phẩm đó). TUYỆT ĐỐI KHÔNG dùng tổng bill, TUYỆT ĐỐI KHÔNG chia đều tổng cho các dòng — giá mỗi sản phẩm THƯỜNG KHÁC NHAU.
+- SoLuongHang = số lượng riêng của dòng đó. DienGiai = tên sản phẩm CỤ THỂ của dòng đó (đọc đúng tên trên bill).
+- Nếu hóa đơn có dòng GIẢM GIÁ/VOUCHER hoặc PHÍ SHIP hiển thị RÕ RÀNG → tách thành Object riêng (giảm giá/voucher: SoTienGoc ÂM; phí ship: PhanLoai "LOG"). Nếu KHÔNG thấy rõ thì bỏ qua, chỉ ghi các dòng sản phẩm.
+- Dùng TÊN CỬA HÀNG + hình ảnh sản phẩm để hiểu đúng mặt hàng rồi đặt DienGiai cho chuẩn. VD cửa hàng "Sơn Duy Auto Win" + hình các hộp/lọ sơn → đây là SƠN nhiều loại/màu → DienGiai ghi rõ "Sơn lót 2K trắng", "Sơn lót 2K đen"...
+- Ví dụ: Bill "Sơn Duy Auto Win": Sơn lót trắng x1 (150.000đ), Sơn lót đen x1 (150.000đ), Sơn DD75 x1 (60.000đ), Sơn mờ x1 (50.000đ) → 4 Object với SoTienGoc lần lượt "150000","150000","60000","50000" (TUYỆT ĐỐI KHÔNG phải 85075 mỗi dòng).
 
 **KỊCH BẢN 2: HÓA ĐƠN NGOẠI TỆ** (1688, Taobao, Alibaba, Amazon, eBay, invoice USD/CNY/EUR...):
 - Mỗi sản phẩm/dịch vụ trên hóa đơn = MỘT object riêng trong mảng.
@@ -192,7 +192,7 @@ Quy tắc:
 - NgayChi: Không tìm thấy → "". KHÔNG bịa ngày.
 - PhanBo: NgayChi rỗng → PhanBo rỗng.
 - "TM" trong text → NguoiChi = "Tiền mặt".
-- VND: tách theo sản phẩm, KHÔNG tách ship/voucher. SoTienGoc = "Thành tiền" cuối (số nguyên, giống nhau mọi object). Backend sẽ chia đều.
+- VND: tách theo sản phẩm; SoTienGoc = giá RIÊNG của từng dòng (số nguyên, KHÔNG chia đều tổng bill). Voucher/ship rõ ràng → tách dòng riêng (voucher âm).
 - Ngoại tệ: tách line item, ship/phí dịch vụ = dòng riêng. SoTienGoc mỗi dòng = số tiền RIÊNG của dòng đó (KHÔNG phải tổng bill).
 - CHỈ trả về JSON Array, KHÔNG text khác.
 
@@ -429,37 +429,8 @@ export async function POST(request: NextRequest) {
             // Process each line item and create separate DB records
             const savedItemsForThisImage: any[] = [];
 
-            // V7.6: Pre-compute VND proportional allocation for multi-item VND bills
-            const firstLoaiTien = sanitizeNullableStr(lineItems[0]?.LoaiTien) || 'VND';
-            let vndProportionalMap: Map<number, number> | null = null;
-            if (firstLoaiTien === 'VND' && lineItems.length > 1) {
-              const thanhTienTotal = parseInt(sanitizeVndInteger(lineItems[0]?.SoTienGoc), 10) || 0;
-              if (thanhTienTotal > 0) {
-                // Calculate total quantity across all items
-                let totalQty = 0;
-                const itemQtys: number[] = [];
-                for (const li of lineItems) {
-                  const q = parseInt(sanitizeVndInteger(li?.SoLuongHang || '1'), 10) || 1;
-                  itemQtys.push(q);
-                  totalQty += q;
-                }
-                if (totalQty > 0) {
-                  vndProportionalMap = new Map();
-                  let allocated = 0;
-                  for (let k = 0; k < lineItems.length; k++) {
-                    if (k === lineItems.length - 1) {
-                      // Last item gets remainder to avoid rounding errors
-                      vndProportionalMap.set(k, thanhTienTotal - allocated);
-                    } else {
-                      const share = Math.round(thanhTienTotal * itemQtys[k] / totalQty);
-                      vndProportionalMap.set(k, share);
-                      allocated += share;
-                    }
-                  }
-                }
-              }
-            }
-
+            // V10: VND -> moi dong dung GIA RIENG cua no (AI tra ve gia tung dong),
+            // KHONG con chia deu tong bill theo ti le so luong nhu V7.6.
             for (let j = 0; j < lineItems.length; j++) {
               const item = lineItems[j];
 
@@ -497,12 +468,8 @@ export async function POST(request: NextRequest) {
               let storedSoTienGoc: string | null = soTienGocRaw;
               try {
                 if (loaiTien === 'VND') {
-                  // V7.6: Use proportional allocation for multi-item VND bills
-                  if (vndProportionalMap && vndProportionalMap.has(j)) {
-                    tongBillVnd = vndProportionalMap.get(j)!.toString();
-                  } else {
-                    tongBillVnd = soTienGocRaw;
-                  }
+                  // V10: dung gia rieng cua tung dong (khong chia deu tong bill).
+                  tongBillVnd = soTienGocRaw;
                   storedSoTienGoc = null; // VND: no separate "số tiền gốc"
                 } else {
                   const rate = rates[loaiTien];

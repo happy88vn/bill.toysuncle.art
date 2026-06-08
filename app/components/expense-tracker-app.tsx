@@ -296,6 +296,14 @@ export default function ExpenseTrackerApp() {
     // Core tokens = tokens with length > 2 (prioritize brand/code/color like "esun", "pla", "black")
     const aiCoreTokens = aiTokens.filter(t => t.length > 2);
 
+    // Bo tu MAU + tu chung chung ra khoi tieu chi khop:
+    // tranh "Son lot trang/den" khop nham "No den / tui zip xam" chi vi trung mau.
+    const colorWords = new Set<string>(['mau']);
+    for (const [k, vals] of Object.entries(BILINGUAL_COLOR_MAP)) {
+      for (const w of tokenize(k)) colorWords.add(w);
+      for (const v of vals) for (const w of tokenize(v)) colorWords.add(w);
+    }
+
     let bestMatch: SkuItem | null = null;
     let bestScore = 0;
 
@@ -307,20 +315,22 @@ export default function ExpenseTrackerApp() {
 
       const itemTokenSet = new Set(itemTokens);
 
-      // Count core token intersections (exact match or substring containment)
-      let coreMatchCount = 0;
+      // Chi dem token SAN PHAM (khong phai mau) trung nhau.
+      let productMatchCount = 0;
       for (const ct of aiCoreTokens) {
+        if (colorWords.has(ct)) continue; // mau khong tinh la khop san pham
         for (const it of itemTokenSet) {
           if (ct === it || it.includes(ct) || ct.includes(it)) {
-            coreMatchCount++;
+            productMatchCount++;
             break;
           }
         }
       }
 
-      // ≥2 core token matches → force select (prioritize highest score)
-      if (coreMatchCount >= 2 && coreMatchCount > bestScore) {
-        bestScore = coreMatchCount;
+      // CAN >=2 token SAN PHAM trung (mau khong du de khop). Ko du -> de trong,
+      // makeRowFromData se tu lay ten AI lam "Mo Ta Moi".
+      if (productMatchCount >= 2 && productMatchCount > bestScore) {
+        bestScore = productMatchCount;
         bestMatch = item;
       }
     }
