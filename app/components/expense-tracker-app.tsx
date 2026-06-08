@@ -415,6 +415,19 @@ export default function ExpenseTrackerApp() {
     return data.viewLink || '';
   };
 
+  // Anh bill luu link Drive (private) -> hien qua proxy /api/drive-image.
+  // blob:/data: (preview luc moi chon anh) thi giu nguyen.
+  const driveImgSrc = (url: string | null | undefined): string => {
+    if (!url) return '';
+    if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+    if (url.includes('drive.google.com') || /^[a-zA-Z0-9_-]{20,}$/.test(url)) {
+      const m = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+      const id = m ? m[1] : url;
+      return `/api/drive-image?id=${encodeURIComponent(id)}`;
+    }
+    return url;
+  };
+
   // Helper: create RowData from SSE data
   const makeRowFromData = (d: any, localPreview: string, currentSkuList: SkuItem[]): RowData => {
     const dienGiai = d.dienGiai || '';
@@ -1642,7 +1655,7 @@ export default function ExpenseTrackerApp() {
                         onClick={(e) => { if (row.imageUrl) { e.stopPropagation(); setLightboxUrl(row.imageUrl); } }}
                       >
                         {row.imageUrl ? (
-                          <img src={row.imageUrl} alt="Ảnh chứng từ" className="absolute inset-0 w-full h-full object-cover" />
+                          <img src={driveImgSrc(row.imageUrl)} alt="Ảnh chứng từ" className="absolute inset-0 w-full h-full object-cover" />
                         ) : (
                           <PenLine className="w-5 h-5 text-gray-400" />
                         )}
@@ -1842,7 +1855,7 @@ export default function ExpenseTrackerApp() {
           </button>
           <div className="relative max-w-4xl max-h-[90vh] w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
             <img
-              src={lightboxUrl}
+              src={driveImgSrc(lightboxUrl)}
               alt="Xem ảnh chứng từ"
               className="max-w-full max-h-[90vh] object-contain"
             />
