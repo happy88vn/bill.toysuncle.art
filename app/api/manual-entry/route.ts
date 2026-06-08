@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
         rmb: rmb || null,
         soTienGoc: soTienGoc || null,
         loaiTien: loaiTien || 'VND',
-        nguonChiPhi: nguonChiPhi || 'External',
+        nguonChiPhi: nguonChiPhi || 'Internal',
         soLuongHang: soLuongHang || null,
         donGia: donGia || null,
         ngayNhanHang: ngayNhanHang || null,

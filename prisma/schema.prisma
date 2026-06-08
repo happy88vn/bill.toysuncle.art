@@ -86,7 +86,7 @@ model ExtractedData {
   soLuongHang        String?
   donGia             String?
   ngayNhanHang       String?
-  nguonChiPhi        String?    @default("External")
+  nguonChiPhi        String?    @default("Internal")
   nguoiChi           String?
   phanLoai           String?
   maChiPhi           String?

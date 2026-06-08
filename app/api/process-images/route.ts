@@ -562,7 +562,7 @@ export async function POST(request: NextRequest) {
                     rmb: rmbVal,
                     soTienGoc: storedSoTienGoc,
                     loaiTien,
-                    nguonChiPhi: 'External',
+                    nguonChiPhi: 'Internal',
                     soLuongHang: soLuongHangRaw,
                     donGia: donGiaVal,
                     ngayNhanHang: ngayNhanHangRaw,

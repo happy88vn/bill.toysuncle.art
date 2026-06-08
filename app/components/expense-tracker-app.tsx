@@ -17,7 +17,7 @@ const PHAN_LOAI_LABELS: Record<string, string> = {
   'QLDN': 'QLDN - Quản lý DN',
   'DT': 'DT - Đầu tư',
 };
-const NGUON_CHI_PHI_OPTIONS = ['External', 'Internal'];
+const NGUON_CHI_PHI_OPTIONS = ['Internal', 'External'];
 const CURRENCY_OPTIONS = [
   'VND', 'USD', 'CNY', 'AUD', 'CAD', 'CHF', 'DKK', 'EUR', 'GBP', 'HKD',
   'INR', 'JPY', 'KRW', 'KWD', 'MYR', 'NOK', 'RUB', 'SAR', 'SEK', 'SGD', 'THB'
@@ -457,7 +457,7 @@ export default function ExpenseTrackerApp() {
       rmb: d.rmb || '0',
       soTienGoc: d.soTienGoc || '0',
       loaiTien: d.loaiTien || 'VND',
-      nguonChiPhi: d.nguonChiPhi || 'External',
+      nguonChiPhi: d.nguonChiPhi || 'Internal',
       soLuongHang: d.soLuongHang || '',
       donGia: d.donGia || computeDonGia(d.vnd || '0', d.soLuongHang || ''),
       ngayNhanHang: d.ngayNhanHang || '',
@@ -684,24 +684,51 @@ export default function ExpenseTrackerApp() {
     } catch { /* silent */ }
   };
 
+  // Các dòng tách từ CÙNG 1 bill -> auto áp giá trị sang nhau khi sửa:
+  //  - FILL_EMPTY: chỉ điền vào dòng cùng bill đang TRỐNG (không ghi đè).
+  //  - OVERWRITE: ghi đè tất cả dòng cùng bill.
+  const FILL_EMPTY_FIELDS: (keyof RowData)[] = ['ngayChi', 'ngayNhanHang', 'nguoiChi'];
+  const OVERWRITE_FIELDS: (keyof RowData)[] = ['phanLoai', 'maChiPhi', 'nguonChiPhi'];
+
   const updateRow = (id: string, field: keyof RowData, value: string) => {
-    setRows(prev => prev.map(r => {
-      if (r.id !== id) return r;
-      const updated = { ...r, [field]: value };
-      if (field === 'ngayChi' && value) {
-        const parts = value.split('/');
-        if (parts.length === 3) {
-          updated.phanBo = `T${parts[1]}/${parts[2]}`;
+    setRows(prev => {
+      const editedRow = prev.find(r => r.id === id);
+      const baseId = editedRow ? getBaseRecordId(editedRow.recordId) : '';
+      const doFillEmpty = FILL_EMPTY_FIELDS.includes(field);
+      const doOverwrite = OVERWRITE_FIELDS.includes(field);
+
+      return prev.map(r => {
+        // 1) Dòng đang sửa
+        if (r.id === id) {
+          const updated = { ...r, [field]: value };
+          if (field === 'ngayChi' && value) {
+            const parts = value.split('/');
+            if (parts.length === 3) updated.phanBo = `T${parts[1]}/${parts[2]}`;
+          }
+          if (field === 'vnd' || field === 'soLuongHang') {
+            const vndVal = field === 'vnd' ? value : updated.vnd;
+            const qtyVal = field === 'soLuongHang' ? value : updated.soLuongHang;
+            updated.donGia = computeDonGia(vndVal, qtyVal);
+          }
+          return updated;
         }
-      }
-      // Auto-calculate donGia when vnd or soLuongHang changes
-      if (field === 'vnd' || field === 'soLuongHang') {
-        const vndVal = field === 'vnd' ? value : updated.vnd;
-        const qtyVal = field === 'soLuongHang' ? value : updated.soLuongHang;
-        updated.donGia = computeDonGia(vndVal, qtyVal);
-      }
-      return updated;
-    }));
+        // 2) Dòng cùng bill (cùng mã gốc, mã không rỗng) -> propagate
+        if (baseId && getBaseRecordId(r.recordId) === baseId) {
+          if (doOverwrite) {
+            return { ...r, [field]: value };
+          }
+          if (doFillEmpty && (!r[field] || r[field] === '')) {
+            const sib = { ...r, [field]: value };
+            if (field === 'ngayChi' && value) {
+              const parts = value.split('/');
+              if (parts.length === 3) sib.phanBo = `T${parts[1]}/${parts[2]}`;
+            }
+            return sib;
+          }
+        }
+        return r;
+      });
+    });
 
     // Trigger currency conversion when soTienGoc or loaiTien changes
     if (field === 'soTienGoc' || field === 'loaiTien') {
@@ -912,7 +939,7 @@ export default function ExpenseTrackerApp() {
     vnd: '',
     soTienGoc: '',
     loaiTien: 'VND',
-    nguonChiPhi: 'External',
+    nguonChiPhi: 'Internal',
     soLuongHang: '',
     donGia: '',
     ngayNhanHang: '',
@@ -1020,7 +1047,7 @@ export default function ExpenseTrackerApp() {
           rmb: null,
           soTienGoc: manualForm.soTienGoc || manualForm.vnd || '0',
           loaiTien: manualForm.loaiTien || 'VND',
-          nguonChiPhi: manualForm.nguonChiPhi || 'External',
+          nguonChiPhi: manualForm.nguonChiPhi || 'Internal',
           soLuongHang: manualForm.soLuongHang || '',
           donGia: manualForm.donGia || computeDonGia(manualForm.vnd, manualForm.soLuongHang),
           ngayNhanHang: manualForm.ngayNhanHang || '',
@@ -1051,7 +1078,7 @@ export default function ExpenseTrackerApp() {
         rmb: savedData.rmb || '0',
         soTienGoc: savedData.soTienGoc || '0',
         loaiTien: savedData.loaiTien || 'VND',
-        nguonChiPhi: savedData.nguonChiPhi || 'External',
+        nguonChiPhi: savedData.nguonChiPhi || 'Internal',
         soLuongHang: savedData.soLuongHang || '',
         donGia: savedData.donGia || computeDonGia(savedData.vnd || '0', savedData.soLuongHang || ''),
         ngayNhanHang: savedData.ngayNhanHang || '',
