@@ -26,10 +26,13 @@ Danh sach day du + giai thich: xem `.env.example`.
 3. Vao **Dashboard → Connection string** → chon ban **Pooled connection**, bat **sslmode=require**. Copy chuoi → day la `DATABASE_URL`.
 4. Tao bang + tai khoan dang nhap dau tien (chay tu may Sep, trong thu muc app):
    ```
-   # tao file .env tam co dong: DATABASE_URL="...chuoi Neon..."
+   # tao file .env tam co cac dong:
+   #   DATABASE_URL="...chuoi Neon..."
+   #   SEED_EMAIL="email-cua-sep@gmail.com"   (phai nam trong ALLOWED_EMAILS)
+   #   SEED_PASSWORD="mat-khau-admin-manh"
    npm install
    npx prisma db push          # tao toan bo bang theo schema
-   npx prisma db seed          # tao tai khoan dang nhap mac dinh (xem scripts/seed.ts)
+   npx prisma db seed          # tao admin theo SEED_EMAIL/SEED_PASSWORD
    ```
    > `db push` dung cho lan dau (chua co migration). Sau nay doi schema thi dung `prisma migrate`.
 
