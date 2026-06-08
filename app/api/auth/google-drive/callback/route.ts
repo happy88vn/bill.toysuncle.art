@@ -35,9 +35,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${baseUrl}/?drive_error=no_code`);
     }
 
-    // Recover the redirect URI from state param
-    const stateRedirectUri = request.nextUrl.searchParams.get('state');
-    const redirectUri = stateRedirectUri || `${baseUrl}/api/auth/google-drive/callback`;
+    // Dung redirect URI tu base tin cay (server-side), KHONG lay tu `state`
+    // vi state do client kiem soat duoc -> tranh bi lai redirect.
+    const redirectUri = `${baseUrl}/api/auth/google-drive/callback`;
 
     const oauth2Client = getDriveOAuth2Client(redirectUri);
     const { tokens } = await oauth2Client.getToken(code);
@@ -54,27 +54,33 @@ export async function GET(request: NextRequest) {
       create: { key: 'GOOGLE_DRIVE_REFRESH_TOKEN', value: tokens.refresh_token },
     });
 
-    // Also save to .env file for backward compatibility
-    const envPath = path.join(process.cwd(), '.env');
-    let envContent = '';
-    try {
-      envContent = fs.readFileSync(envPath, 'utf-8');
-    } catch { /* file may not exist */ }
-
-    if (envContent.includes('GOOGLE_OAUTH_REFRESH_TOKEN=')) {
-      envContent = envContent.replace(
-        /GOOGLE_OAUTH_REFRESH_TOKEN=.*/,
-        `GOOGLE_OAUTH_REFRESH_TOKEN=${tokens.refresh_token}`
-      );
-    } else {
-      envContent += `\nGOOGLE_OAUTH_REFRESH_TOKEN=${tokens.refresh_token}`;
-    }
-    fs.writeFileSync(envPath, envContent, 'utf-8');
-
-    // Also set in process.env for immediate use
+    // Set in process.env for immediate use trong tien trinh hien tai.
     process.env.GOOGLE_OAUTH_REFRESH_TOKEN = tokens.refresh_token;
 
-    console.log('Drive OAuth refresh token saved to DB + .env successfully');
+    // Best-effort ghi .env (chi co tac dung khi chay local co FS ghi duoc).
+    // Tren Vercel/serverless FS la read-only -> KHONG duoc de loi nay lam
+    // hong ca callback, vi token da luu DB (nguon chinh) o tren roi.
+    try {
+      const envPath = path.join(process.cwd(), '.env');
+      let envContent = '';
+      try {
+        envContent = fs.readFileSync(envPath, 'utf-8');
+      } catch { /* file may not exist */ }
+
+      if (envContent.includes('GOOGLE_OAUTH_REFRESH_TOKEN=')) {
+        envContent = envContent.replace(
+          /GOOGLE_OAUTH_REFRESH_TOKEN=.*/,
+          `GOOGLE_OAUTH_REFRESH_TOKEN=${tokens.refresh_token}`
+        );
+      } else {
+        envContent += `\nGOOGLE_OAUTH_REFRESH_TOKEN=${tokens.refresh_token}`;
+      }
+      fs.writeFileSync(envPath, envContent, { mode: 0o600, encoding: 'utf-8' });
+    } catch (e) {
+      console.warn('Skip ghi .env (FS read-only?) — token van luu o DB.', e);
+    }
+
+    console.log('Drive OAuth refresh token saved to DB successfully');
     return NextResponse.redirect(`${baseUrl}/?drive_connected=true`);
   } catch (error: any) {
     console.error('Drive OAuth callback error:', error);

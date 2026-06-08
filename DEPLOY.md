@@ -94,8 +94,11 @@ Vao **Google Cloud Console → APIs & Services → Credentials** → mo OAuth cl
   - `https://bill.toysuncle.art/api/auth/google-drive/callback`  (cap quyen Google Drive de upload bill)
 - Luu lai. Khong co dong nay thi se loi `redirect_uri_mismatch`.
 
-> **Tai khoan dang nhap mac dinh** (tu seed): email `john@doe.com`. Sep nen doi mat khau/email nay
-> bang cach sua `scripts/seed.ts` truoc khi chay `prisma db seed`, hoac tao user moi sau khi vao app.
+> **QUAN TRONG — allowlist ap dung cho MOI cach dang nhap** (da va bao mat):
+> Email dang nhap (ke ca tai khoan mat khau, va dang ky qua /api/signup) BAT BUOC nam trong
+> `ALLOWED_EMAILS`. Tai khoan seed mac dinh `john@doe.com` se BI CHAN neu khong them vao allowlist.
+> → Sep sua `scripts/seed.ts` doi email seed thanh 1 email that nam trong `ALLOWED_EMAILS`
+> truoc khi chay `prisma db seed` (hoac them email do vao ALLOWED_EMAILS).
 
 ---
 

@@ -41,14 +41,12 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async signIn({ user, account }) {
-      // For credentials provider, allow the test account through
-      if (account?.provider === 'credentials') return true;
-
-      // For Google SSO, enforce the allowlist
+    async signIn({ user }) {
+      // Allowlist ap dung cho MOI provider (Google SSO lan dang nhap mat khau).
+      // Truoc day credentials duoc cho qua vo dieu kien -> bat ky tai khoan nao
+      // (vd tao qua /api/signup) cung vao duoc. Gio sieu chot bang allowlist.
       const email = user.email?.toLowerCase() || '';
       if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(email)) {
-        // Redirect to login with error
         return '/login?error=AccessDenied';
       }
       return true;
