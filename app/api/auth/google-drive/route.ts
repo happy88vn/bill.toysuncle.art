@@ -32,7 +32,9 @@ export async function GET(request: NextRequest) {
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
-      scope: ['https://www.googleapis.com/auth/drive.file'],
+      // Full Drive scope: can de ghi vao folder CO SAN (vd BILL_TOYS_UNCLE).
+      // drive.file chi thay file do app tao -> khong tro vao folder san co duoc.
+      scope: ['https://www.googleapis.com/auth/drive'],
       state: redirectUri,
     });
 
