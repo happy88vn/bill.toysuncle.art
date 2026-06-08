@@ -2,10 +2,46 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getFileUrl } from '@/lib/s3';
+import { getDriveUserToken } from '@/lib/google-auth';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { XMLParser } from 'fast-xml-parser';
+
+// OpenRouter (OpenAI-compatible). Model doc bill mac dinh: Gemini Pro
+// (OCR goc tot nhat cho anh chup hoa don + da ngon ngu + chi phi thap).
+// Doi 1 dong env OPENROUTER_MODEL la sang Claude/GPT neu muon.
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-pro';
+
+/** Lay Google Drive fileId tu cac dang link/khoa khac nhau. */
+function extractDriveFileId(link: string): string | null {
+  if (!link) return null;
+  const byPath = link.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (byPath) return byPath[1];
+  const byQuery = link.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (byQuery) return byQuery[1];
+  // Co the chinh la fileId tho.
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(link)) return link;
+  return null;
+}
+
+/** Tai bytes anh tu Google Drive (thay cho S3) va tra ve base64 + mime that. */
+async function downloadDriveImage(driveLink: string): Promise<{ base64: string; mime: string }> {
+  const fileId = extractDriveFileId(driveLink);
+  if (!fileId) throw new Error('Khong lay duoc fileId tu driveLink');
+  const accessToken = await getDriveUserToken();
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`Tai anh tu Drive that bai (${res.status}): ${t.substring(0, 150)}`);
+  }
+  const mime = res.headers.get('content-type') || 'image/jpeg';
+  const buf = await res.arrayBuffer();
+  return { base64: Buffer.from(buf).toString('base64'), mime };
+}
 
 const SYSTEM_PROMPT = `Bạn là một Kế toán viên AI cao cấp. Nhiệm vụ của bạn là đọc hình ảnh hóa đơn, biên lai, bill điện tử và ghi chú để trích xuất dữ liệu tài chính.
 
@@ -254,30 +290,30 @@ export async function POST(request: NextRequest) {
 
         for (let i = 0; i < images.length; i++) {
           const image = images[i];
-          const { cloud_storage_path, isPublic, driveLink } = image;
+          const { driveLink } = image;
           const noteForImage = userNotes?.[i] || '';
           const recordId = recordIds?.[i] || `REC${Date.now()}`;
 
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ status: 'processing', current: i + 1, total: images.length, message: `Đang xử lý ảnh ${i + 1}/${images.length}...` })}\n\n`));
 
           try {
-            const imageUrl = await getFileUrl(cloud_storage_path, isPublic || false);
-            const imageResponse = await fetch(imageUrl);
-            const imageBuffer = await imageResponse.arrayBuffer();
-            const base64Image = Buffer.from(imageBuffer).toString('base64');
+            // Tai anh tu Google Drive (anh da duoc upload len Drive o buoc truoc).
+            const { base64: base64Image, mime: imageMime } = await downloadDriveImage(driveLink);
 
             const userMessage = noteForImage
               ? `Ghi chú từ người dùng: "${noteForImage}"\n\nHãy phân tích hình ảnh kết hợp với ghi chú trên để trích xuất dữ liệu tài chính. Trả về JSON Array.`
               : 'Hãy phân tích hình ảnh này để trích xuất dữ liệu tài chính. Trả về JSON Array.';
 
-            const apiResponse = await fetch('https://apps.abacus.ai/v1/chat/completions', {
+            const apiResponse = await fetch(OPENROUTER_URL, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.ABACUSAI_API_KEY}`
+                'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                'HTTP-Referer': process.env.NEXTAUTH_URL || 'https://bill.toysuncle.art',
+                'X-Title': 'Toys Uncle Bill Tracker'
               },
               body: JSON.stringify({
-                model: 'gpt-4o',
+                model: OPENROUTER_MODEL,
                 messages: [
                   { role: 'system', content: SYSTEM_PROMPT },
                   {
@@ -286,7 +322,7 @@ export async function POST(request: NextRequest) {
                       { type: 'text', text: userMessage },
                       {
                         type: 'image_url',
-                        image_url: { url: `data:image/jpeg;base64,${base64Image}` }
+                        image_url: { url: `data:${imageMime};base64,${base64Image}` }
                       }
                     ]
                   }
@@ -481,9 +517,9 @@ export async function POST(request: NextRequest) {
                 savedData = await prisma.extractedData.create({
                   data: {
                     transactionId,
-                    imageUrl: imageUrl,
-                    cloudStoragePath: cloud_storage_path,
-                    isPublic: isPublic || false,
+                    imageUrl: driveLink,
+                    cloudStoragePath: '',
+                    isPublic: false,
                     ngayChi,
                     phanBo,
                     chungTuChi: chungTuMuaHangVal,

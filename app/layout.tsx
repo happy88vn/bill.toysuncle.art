@@ -26,7 +26,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="vi">
       <head>
         <meta charSet="UTF-8" />
-        <script src="https://apps.abacus.ai/chatllm/appllm-lib.js" async></script>
       </head>
       <body className={inter.className}>
         <Providers>

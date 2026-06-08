@@ -569,34 +569,9 @@ export default function ExpenseTrackerApp() {
       if (!transactionRes.ok) throw new Error('Không thể tạo transaction');
       const transaction = await transactionRes.json();
 
-      // Step 3: Upload to S3
-      setProgressFn({ current: 0, total: filesList.length, message: 'Đang upload ảnh để AI xử lý...' });
-      const uploadedImages: { cloud_storage_path: string; isPublic: boolean; driveLink: string }[] = [];
-      for (let i = 0; i < filesList.length; i++) {
-        setProgressFn({ current: i + 1, total: filesList.length, message: `Đang chuẩn bị ảnh ${i + 1}/${filesList.length}...` });
-        const file = filesList[i].file;
-
-        const presignedRes = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileName: file.name, contentType: file.type, transactionId: transaction.id }),
-        });
-        if (!presignedRes.ok) throw new Error(`Không thể upload ${file.name}`);
-        const { uploadUrl, cloud_storage_path } = await presignedRes.json();
-
-        const uploadHeaders = new Headers();
-        uploadHeaders.set('Content-Type', file.type);
-        const urlObj = new URL(uploadUrl);
-        const signedHeaders = urlObj.searchParams.get('X-Amz-SignedHeaders');
-        if (signedHeaders?.includes('content-disposition')) {
-          uploadHeaders.set('Content-Disposition', 'attachment');
-        }
-
-        const uploadResponse = await fetch(uploadUrl, { method: 'PUT', headers: uploadHeaders, body: file });
-        if (!uploadResponse.ok) throw new Error(`Upload failed for ${file.name}`);
-
-        uploadedImages.push({ cloud_storage_path, isPublic: false, driveLink: driveLinks[i] || '' });
-      }
+      // Step 3: AI doc anh THANG TU GOOGLE DRIVE (anh da upload o Step 1).
+      // Bo han khau S3 trung gian — Drive vua la kho luu vua la nguon cho AI.
+      const uploadedImages: { driveLink: string }[] = driveLinks.map((link) => ({ driveLink: link }));
 
       // Step 4: Process with AI
       setProgressFn({ current: 0, total: filesList.length, message: 'AI đang phân tích ảnh...' });
