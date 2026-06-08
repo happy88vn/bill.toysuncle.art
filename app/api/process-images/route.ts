@@ -84,12 +84,12 @@ BẮT BUỘC: Kết quả đầu ra phải là một JSON **Array** (mảng). M�
 === QUAN TRỌNG: LOGIC TÁCH DÒNG THEO LOẠI TIỀN ===
 
 **KỊCH BẢN 1: HÓA ĐƠN VND / NỘI ĐỊA** (Shopee, Lazada, Tiki, hóa đơn Việt Nam):
-- Mỗi sản phẩm KHÁC NHAU → MỘT Object riêng. Chỉ có 1 sản phẩm → 1 Object.
-- **SoTienGoc của MỖI Object = GIÁ RIÊNG của dòng đó** (số tiền "Thành tiền" hiển thị NGAY CẠNH sản phẩm đó). TUYỆT ĐỐI KHÔNG dùng tổng bill, TUYỆT ĐỐI KHÔNG chia đều tổng cho các dòng — giá mỗi sản phẩm THƯỜNG KHÁC NHAU.
-- SoLuongHang = số lượng riêng của dòng đó. DienGiai = tên sản phẩm CỤ THỂ của dòng đó (đọc đúng tên trên bill).
-- Nếu hóa đơn có dòng GIẢM GIÁ/VOUCHER hoặc PHÍ SHIP hiển thị RÕ RÀNG → tách thành Object riêng (giảm giá/voucher: SoTienGoc ÂM; phí ship: PhanLoai "LOG"). Nếu KHÔNG thấy rõ thì bỏ qua, chỉ ghi các dòng sản phẩm.
-- Dùng TÊN CỬA HÀNG + hình ảnh sản phẩm để hiểu đúng mặt hàng rồi đặt DienGiai cho chuẩn. VD cửa hàng "Sơn Duy Auto Win" + hình các hộp/lọ sơn → đây là SƠN nhiều loại/màu → DienGiai ghi rõ "Sơn lót 2K trắng", "Sơn lót 2K đen"...
-- Ví dụ: Bill "Sơn Duy Auto Win": Sơn lót trắng x1 (150.000đ), Sơn lót đen x1 (150.000đ), Sơn DD75 x1 (60.000đ), Sơn mờ x1 (50.000đ) → 4 Object với SoTienGoc lần lượt "150000","150000","60000","50000" (TUYỆT ĐỐI KHÔNG phải 85075 mỗi dòng).
+- Mỗi sản phẩm KHÁC NHAU → MỘT Object riêng. Chỉ có 1 sản phẩm → 1 Object. KHÔNG tạo dòng riêng cho voucher/giảm giá/phí ship.
+- **SoTienGoc của MỖI Object = GIÁ LISTING RIÊNG của dòng đó** (số tiền hiển thị NGAY CẠNH sản phẩm đó). TUYỆT ĐỐI KHÔNG chia đều, KHÔNG dùng tổng bill — giá mỗi sản phẩm THƯỜNG KHÁC NHAU.
+- **TongThanhToan = số tiền THỰC TRẢ cuối cùng của cả hóa đơn** (dòng "Thành tiền"/"Tổng thanh toán"), GHI GIỐNG NHAU cho MỌI Object. Backend tự phân bổ phần giảm giá theo TỶ LỆ giá trị từng dòng. Nếu không có giảm giá → TongThanhToan = tổng các dòng.
+- SoLuongHang = số lượng riêng của dòng đó. DienGiai = tên sản phẩm CỤ THỂ (đọc đúng tên trên bill).
+- Dùng TÊN CỬA HÀNG + hình ảnh sản phẩm để hiểu đúng mặt hàng rồi đặt DienGiai cho chuẩn. VD cửa hàng "Sơn Duy Auto Win" + hình các hộp/lọ sơn → đây là SƠN nhiều loại/màu → "Sơn lót 2K trắng", "Sơn lót 2K đen"...
+- Ví dụ: Bill "Sơn Duy Auto Win", Thành tiền 340.300đ, gồm Sơn lót trắng x1 (150.000đ), Sơn lót đen x1 (150.000đ), Sơn DD75 x1 (60.000đ), Sơn mờ x1 (50.000đ) → 4 Object: SoTienGoc lần lượt "150000","150000","60000","50000", TongThanhToan="340300" cho cả 4. (Backend tự ra đơn giá sau giảm 124500/124500/49800/41500.)
 
 **KỊCH BẢN 2: HÓA ĐƠN NGOẠI TỆ** (1688, Taobao, Alibaba, Amazon, eBay, invoice USD/CNY/EUR...):
 - Mỗi sản phẩm/dịch vụ trên hóa đơn = MỘT object riêng trong mảng.
@@ -124,6 +124,8 @@ Mỗi object trong mảng phải có chính xác các key sau:
 "DienGiai": Tên sản phẩm/dịch vụ CỤ THỂ cho dòng này. Dưới 15 chữ.
 
 "SoTienGoc": Số tiền GỐC của dòng này theo đơn vị tiền tệ trên hóa đơn. (Chỉ ghi số, có thể âm cho voucher). Nếu là VND → ghi số nguyên (46420, KHÔNG phải 46.42).
+
+"TongThanhToan": (CHỈ cho hóa đơn VND) Tổng số tiền THỰC TRẢ cuối cùng của cả hóa đơn (dòng "Thành tiền"/"Tổng thanh toán"). Ghi số nguyên, GIỐNG NHAU cho mọi object trong bill. Nếu không tìm thấy → "".
 
 "LoaiTien": Mã tiền tệ ISO 3 chữ cái: VND, USD, CNY, EUR, GBP, JPY, AUD, CAD, CHF, DKK, HKD, INR, KRW, KWD, MYR, NOK, RUB, SAR, SEK, SGD, THB. Mặc định "VND" nếu là tiền Việt (₫, đ, VNĐ). USD nếu có $. CNY nếu có ¥, 元, Tệ.
 
@@ -429,8 +431,33 @@ export async function POST(request: NextRequest) {
             // Process each line item and create separate DB records
             const savedItemsForThisImage: any[] = [];
 
-            // V10: VND -> moi dong dung GIA RIENG cua no (AI tra ve gia tung dong),
-            // KHONG con chia deu tong bill theo ti le so luong nhu V7.6.
+            // V10: VND multi-item -> phan bo GIAM GIA theo TI LE GIA TRI tung dong.
+            // Moi dong co GIA LISTING rieng (SoTienGoc); neu tong listing > TongThanhToan
+            // (tuc co giam gia) thi nhan moi dong voi ti le = TongThanhToan / tong listing,
+            // de tong cac dong = dung so tien thuc tra. Khong co giam gia -> giu nguyen listing.
+            const firstLoaiTien = sanitizeNullableStr(lineItems[0]?.LoaiTien) || 'VND';
+            let vndAllocMap: Map<number, number> | null = null;
+            if (firstLoaiTien === 'VND' && lineItems.length > 1) {
+              const paidTotal = parseInt(sanitizeVndInteger(lineItems[0]?.TongThanhToan || '0'), 10) || 0;
+              const listed: number[] = lineItems.map((li: any) => parseInt(sanitizeVndInteger(li?.SoTienGoc), 10) || 0);
+              const subtotal = listed.reduce((a, b) => a + b, 0);
+              const ratio = subtotal > 0 ? paidTotal / subtotal : 0;
+              // Chi ap khi co TongThanhToan hop le va ti le trong khoang an toan (0.2..2).
+              if (paidTotal > 0 && subtotal > 0 && ratio >= 0.2 && ratio <= 2) {
+                vndAllocMap = new Map();
+                let allocated = 0;
+                for (let k = 0; k < listed.length; k++) {
+                  if (k === listed.length - 1) {
+                    vndAllocMap.set(k, paidTotal - allocated); // dong cuoi lay phan du -> tong khop tuyet doi
+                  } else {
+                    const share = Math.round(listed[k] * ratio);
+                    vndAllocMap.set(k, share);
+                    allocated += share;
+                  }
+                }
+              }
+            }
+
             for (let j = 0; j < lineItems.length; j++) {
               const item = lineItems[j];
 
@@ -468,8 +495,13 @@ export async function POST(request: NextRequest) {
               let storedSoTienGoc: string | null = soTienGocRaw;
               try {
                 if (loaiTien === 'VND') {
-                  // V10: dung gia rieng cua tung dong (khong chia deu tong bill).
-                  tongBillVnd = soTienGocRaw;
+                  // V10: gia tung dong sau khi phan bo giam gia theo ti le (neu co),
+                  // neu khong thi dung gia listing rieng cua dong.
+                  if (vndAllocMap && vndAllocMap.has(j)) {
+                    tongBillVnd = vndAllocMap.get(j)!.toString();
+                  } else {
+                    tongBillVnd = soTienGocRaw;
+                  }
                   storedSoTienGoc = null; // VND: no separate "số tiền gốc"
                 } else {
                   const rate = rates[loaiTien];
