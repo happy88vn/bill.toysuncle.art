@@ -717,13 +717,20 @@ export default function ExpenseTrackerApp() {
           if (doOverwrite) {
             return { ...r, [field]: value };
           }
-          if (doFillEmpty && (!r[field] || r[field] === '')) {
-            const sib = { ...r, [field]: value };
-            if (field === 'ngayChi' && value) {
-              const parts = value.split('/');
-              if (parts.length === 3) sib.phanBo = `T${parts[1]}/${parts[2]}`;
+          if (doFillEmpty) {
+            const oldVal = (editedRow ? (editedRow[field] as string) : '') || '';
+            const cur = (r[field] as string) || '';
+            // Mirror: điền nếu dòng đang TRỐNG, hoặc đang khớp giá trị CŨ của dòng
+            // nguồn (đang soi gương, chưa bị sửa tay khác) -> bám tới giá trị cuối,
+            // tránh kẹt ở ký tự đầu khi gõ từng phím.
+            if (cur === '' || cur === oldVal) {
+              const sib = { ...r, [field]: value };
+              if (field === 'ngayChi' && value) {
+                const parts = value.split('/');
+                if (parts.length === 3) sib.phanBo = `T${parts[1]}/${parts[2]}`;
+              }
+              return sib;
             }
-            return sib;
           }
         }
         return r;
