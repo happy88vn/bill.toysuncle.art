@@ -1,0 +1,40 @@
+# === Secrets — KHONG BAO GIO commit ===
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Secret credential files (Abacus auth + Google service account private key)
+data/
+*.secrets.json
+google-service-account.json
+abacusai_auth_secrets.json
+
+# Dependencies
+node_modules/
+.yarn/
+.pnp.*
+
+# Next.js build
+.next/
+out/
+build/
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# Prisma generated client
+prisma/generated/
+
+# Abacus platform leftovers
+.abacus.donotdelete
+
+# Logs / OS
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+
+# Vercel
+.vercel

@@ -1,0 +1,131 @@
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          String    @default("user")
+  accounts      Account[]
+  sessions      Session[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Transaction {
+  id              String          @id @default(cuid())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  status          String          @default("processing")
+  totalImages     Int             @default(0)
+  processedImages Int             @default(0)
+  extractedData   ExtractedData[]
+
+  @@index([createdAt])
+}
+
+model ExtractedData {
+  id                 String      @id @default(cuid())
+  transactionId      String
+  imageUrl           String
+  cloudStoragePath   String
+  isPublic           Boolean     @default(false)
+  ngayChi            String?
+  phanBo             String?
+  chungTuChi         String?
+  dienGiai           String?
+  vnd                String?
+  usd                String?
+  rmb                String?
+  soTienGoc          String?
+  loaiTien           String?    @default("VND")
+  soLuongHang        String?
+  donGia             String?
+  ngayNhanHang       String?
+  nguonChiPhi        String?    @default("External")
+  nguoiChi           String?
+  phanLoai           String?
+  maChiPhi           String?
+  linkChungTu        String?
+  trangThai          String?     @default("Chờ duyệt")
+  recordId           String?
+  rawData            String?
+  status             String      @default("pending")
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  transaction        Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  // Keep old fields for backward compat
+  ngayChungTu        String?
+  phanBoChiPhi       String?
+  nguoiYeuCau        String?
+  dienGiaiChi        String?
+  soTienVND          String?
+  soTienUSD          String?
+  soTienEUR          String?
+  ghiChu             String?
+  phanLoaiChiPhi     String?
+  dienGiaiLoaiChiPhi String?
+
+  @@index([transactionId])
+  @@index([status])
+}
+
+model GoogleSheetConfig {
+  id        String   @id @default(cuid())
+  sheetId   String   @unique
+  sheetName String
+  sheetUrl  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AppConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
