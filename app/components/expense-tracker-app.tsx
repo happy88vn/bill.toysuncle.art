@@ -445,6 +445,7 @@ export default function ExpenseTrackerApp() {
   const attachVanDonToRow = async (row: RowData, file: File) => {
     if (!file) return;
     setVanDonUploading(row.id);
+    const oldLink = row.anhVanDon; // neu day la "Doi anh khac" -> co link cu can don
     try {
       const baseId = getBaseRecordId(row.recordId);
       const safe = (row.chungTuChi || row.recordId || 'vandon').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
@@ -454,6 +455,11 @@ export default function ExpenseTrackerApp() {
         const sameOrder = !!baseId && getBaseRecordId(r.recordId) === baseId;
         return (sameRow || sameOrder) ? { ...r, anhVanDon: link } : r;
       }));
+      // Thay anh: xoa file Drive cu de tranh rac (chi khi dong CHUA sync — neu da sync
+      // thi sheet con tro vao link cu nen giu lai).
+      if (oldLink && oldLink !== link && row.trangThai !== 'Đã duyệt') {
+        await deleteDriveFiles([oldLink]);
+      }
       toast.success('Đã đính kèm ảnh vận đơn vào hóa đơn');
     } catch (e: any) {
       toast.error(e?.message || 'Lỗi tải ảnh vận đơn');
@@ -466,12 +472,16 @@ export default function ExpenseTrackerApp() {
     setVanDonItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
   };
 
-  const removeVanDonItem = (id: string) => {
-    setVanDonItems(prev => {
-      const it = prev.find(x => x.id === id);
-      if (it?.previewUrl) URL.revokeObjectURL(it.previewUrl);
-      return prev.filter(x => x.id !== id);
-    });
+  const removeVanDonItem = async (id: string) => {
+    const it = vanDonItems.find(x => x.id === id);
+    if (it?.previewUrl) URL.revokeObjectURL(it.previewUrl);
+    setVanDonItems(prev => prev.filter(x => x.id !== id));
+    // Da upload len Drive NHUNG CHUA gan vao bill (status != 'done') -> xoa file Drive tranh rac.
+    // Neu da 'done' (da gan vao hoa don) -> GIU lai vi anh dang la chung tu cua bill do.
+    if (it?.driveLink && it.status !== 'done') {
+      const ok = await deleteDriveFiles([it.driveLink]);
+      if (ok) toast.success('Đã xoá ảnh khỏi Drive');
+    }
   };
 
   // (B) Panel "Gan theo Ma don hang": upload anh -> OCR doc Ma don -> Sep xac nhan -> gan.
