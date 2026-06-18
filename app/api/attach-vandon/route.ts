@@ -40,10 +40,84 @@ export async function POST(request: NextRequest) {
 
     const maDonHang = norm(maDonHangRaw);
 
-    // ===== 1) Cap nhat DB: moi dong cung Ma don hang (chungTuChi) =====
+    // ===== B1: GOOGLE SHEET LA CHUAN. Phai doc duoc sheet de kiem tra. =====
+    if (!sheetId) {
+      const cfg = await prisma.googleSheetConfig.findFirst({ orderBy: { updatedAt: 'desc' } });
+      sheetId = cfg?.sheetId || '';
+    }
+    if (!sheetId) {
+      return NextResponse.json({ success: false, message: 'Chưa cấu hình Google Sheet — không thể kiểm tra hóa đơn. Hãy đồng bộ hóa đơn lên Sheet trước.' });
+    }
+
+    const accessToken = await getGoogleAccessToken();
+    const readRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(SHEET_TAB)}!A1:S?majorDimension=ROWS`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!readRes.ok) {
+      const t = (await readRes.text().catch(() => '')).substring(0, 200);
+      console.error('attach-vandon read sheet error:', t);
+      return NextResponse.json({ success: false, message: `Không đọc được Google Sheet để kiểm tra (lỗi ${readRes.status}). Thử lại.` });
+    }
+    const readData = await readRes.json();
+    const values: string[][] = readData?.values || [];
+
+    // ===== B2: Tim cac dong khop Ma don hang (cot C). =====
+    const matchedRowNums: number[] = [];
+    let alreadyAttached = false;
+    for (let i = 1; i < values.length; i++) {
+      const cell = values[i]?.[MADON_COL_INDEX];
+      if (cell && norm(cell) === maDonHang) {
+        matchedRowNums.push(i + 1); // so dong tren sheet = index + 1
+        const sCell = values[i]?.[18]; // cot S (Link Van Don)
+        if (sCell && String(sCell).trim()) alreadyAttached = true;
+      }
+    }
+
+    // CHOT CHAN 1: ma don KHONG co trong Sheet -> chan (tranh nhap nham hang khong co bill).
+    if (matchedRowNums.length === 0) {
+      return NextResponse.json({
+        success: false,
+        code: 'NOT_FOUND',
+        message: `Mã đơn hàng "${maDonHangRaw}" KHÔNG có trong Google Sheets — chưa có hóa đơn. Không thể gắn (tránh nhập nhầm hàng không có bill).`,
+      });
+    }
+
+    // CHOT CHAN 2: da gan van don roi -> chan, bao da nhap roi.
+    if (alreadyAttached) {
+      return NextResponse.json({
+        success: false,
+        code: 'ALREADY_ATTACHED',
+        message: `Mã đơn hàng "${maDonHangRaw}" ĐÃ gắn ảnh vận đơn trước đó rồi — không gắn lại.`,
+      });
+    }
+
+    // ===== B3: Ghi cot S cho cac dong khop + dam bao nhan cot S. =====
+    const updates: { range: string; values: string[][] }[] = [];
+    const headerRow = values[0] || [];
+    if (!(headerRow[18] && String(headerRow[18]).trim())) {
+      updates.push({ range: `${SHEET_TAB}!${VANDON_COL}1`, values: [['Link Vận đơn (GH)']] });
+    }
+    for (const rowNum of matchedRowNums) {
+      updates.push({ range: `${SHEET_TAB}!${VANDON_COL}${rowNum}`, values: [[driveLink]] });
+    }
+    const upRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: updates }),
+      }
+    );
+    if (!upRes.ok) {
+      const t = (await upRes.text().catch(() => '')).substring(0, 200);
+      console.error('attach-vandon batchUpdate error:', t);
+      return NextResponse.json({ success: false, message: `Lỗi ghi Google Sheet: ${t}` });
+    }
+
+    // ===== B4: Cap nhat DB cho dong bo (best-effort, khong chan neu loi). =====
     let dbUpdated = 0;
     try {
-      // Khop khong phan biet hoa/thuong cho chac (ma don tu OCR/go tay).
       const r = await prisma.extractedData.updateMany({
         where: { chungTuChi: { equals: maDonHangRaw, mode: 'insensitive' } },
         data: { anhVanDon: driveLink },
@@ -53,81 +127,11 @@ export async function POST(request: NextRequest) {
       console.error('attach-vandon DB update error:', e?.message);
     }
 
-    // ===== 2) Cap nhat Google Sheet (neu hoa don da sync) =====
-    let sheetUpdated = 0;
-    let sheetError: string | undefined;
-    try {
-      if (!sheetId) {
-        const cfg = await prisma.googleSheetConfig.findFirst({ orderBy: { updatedAt: 'desc' } });
-        sheetId = cfg?.sheetId || '';
-      }
-      if (sheetId) {
-        const accessToken = await getGoogleAccessToken();
-        // Doc toan bo vung A:S de tim dong khop Ma don hang (cot C).
-        const readRes = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(SHEET_TAB)}!A1:S?majorDimension=ROWS`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
-        if (readRes.ok) {
-          const readData = await readRes.json();
-          const values: string[][] = readData?.values || [];
-          const updates: { range: string; values: string[][] }[] = [];
-          // Dam bao nhan cot S co san (truong hop sheet chua tung sync 19 cot).
-          const headerRow = values[0] || [];
-          if (!(headerRow[18] && String(headerRow[18]).trim())) {
-            updates.push({ range: `${SHEET_TAB}!${VANDON_COL}1`, values: [['Link Vận đơn (GH)']] });
-          }
-          // Bo qua dong 1 (header). So dong tren sheet = index + 1.
-          let matched = 0;
-          for (let i = 1; i < values.length; i++) {
-            const cell = values[i]?.[MADON_COL_INDEX];
-            if (cell && norm(cell) === maDonHang) {
-              const rowNum = i + 1;
-              updates.push({ range: `${SHEET_TAB}!${VANDON_COL}${rowNum}`, values: [[driveLink]] });
-              matched++;
-            }
-          }
-          if (updates.length > 0) {
-            const upRes = await fetch(
-              `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`,
-              {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: updates }),
-              }
-            );
-            if (upRes.ok) {
-              sheetUpdated = matched; // chi dem dong hoa don khop, khong tinh o header
-            } else {
-              sheetError = (await upRes.text().catch(() => '')).substring(0, 200);
-              console.error('attach-vandon sheet batchUpdate error:', sheetError);
-            }
-          }
-        } else {
-          sheetError = `Đọc sheet lỗi ${readRes.status}`;
-        }
-      }
-    } catch (e: any) {
-      sheetError = e?.message;
-      console.error('attach-vandon sheet update error:', e?.message);
-    }
-
-    if (dbUpdated === 0 && sheetUpdated === 0) {
-      return NextResponse.json({
-        success: false,
-        dbUpdated,
-        sheetUpdated,
-        message: `Không tìm thấy hóa đơn nào có Mã đơn hàng "${maDonHangRaw}". Kiểm tra lại mã hoặc nhập hóa đơn trước.`,
-        sheetError,
-      });
-    }
-
     return NextResponse.json({
       success: true,
+      sheetUpdated: matchedRowNums.length,
       dbUpdated,
-      sheetUpdated,
-      message: `Đã gắn ảnh vận đơn vào ${dbUpdated} dòng (DB)${sheetUpdated ? ` + ${sheetUpdated} dòng trên Sheet` : ''}.`,
-      sheetError,
+      message: `Đã gắn ảnh vận đơn vào ${matchedRowNums.length} dòng trên Google Sheets.`,
     });
   } catch (error: any) {
     console.error('attach-vandon error:', error);
