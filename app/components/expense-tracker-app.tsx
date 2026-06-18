@@ -1713,37 +1713,44 @@ export default function ExpenseTrackerApp() {
                 {vanDonItems.map(item => {
                   const busy = item.status === 'uploading' || item.status === 'reading' || item.status === 'attaching';
                   return (
-                    <div key={item.id} className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
-                      <button type="button" onClick={() => item.driveLink && setLightboxUrl(driveImgSrc(item.driveLink))} className="shrink-0">
-                        <img src={item.driveLink ? driveImgSrc(item.driveLink) : item.previewUrl} alt="Tem vận đơn" className="w-16 h-16 object-cover rounded-lg border border-gray-200 hover:opacity-80" />
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Mã đơn hàng</label>
-                        <input
-                          type="text"
-                          list="recent-madon-list"
-                          value={item.maDonHang}
-                          disabled={busy || item.status === 'done'}
-                          onChange={(e) => updateVanDonItem(item.id, { maDonHang: e.target.value })}
-                          placeholder="VD: 2606169D8SAA8U"
-                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:border-orange-400 focus:ring-1 focus:ring-orange-400 outline-none disabled:bg-gray-100"
-                        />
-                        <p className={`text-xs mt-1 ${item.status === 'error' ? 'text-red-500' : item.status === 'done' ? 'text-green-600' : 'text-gray-400'}`}>{item.message}</p>
+                    <div key={item.id} className="p-3 rounded-xl border border-gray-200 bg-gray-50">
+                      <div className="flex items-start gap-3">
+                        <button type="button" onClick={() => item.driveLink && setLightboxUrl(driveImgSrc(item.driveLink))} className="shrink-0">
+                          <img src={item.driveLink ? driveImgSrc(item.driveLink) : item.previewUrl} alt="Tem vận đơn" className="w-16 h-16 object-cover rounded-lg border border-gray-200 hover:opacity-80" />
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Mã đơn hàng</label>
+                          <input
+                            type="text"
+                            list="recent-madon-list"
+                            value={item.maDonHang}
+                            disabled={busy || item.status === 'done'}
+                            onChange={(e) => updateVanDonItem(item.id, { maDonHang: e.target.value })}
+                            placeholder="VD: 2606169D8SAA8U"
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:border-orange-400 focus:ring-1 focus:ring-orange-400 outline-none disabled:bg-gray-100"
+                          />
+                          <p className={`text-xs mt-1 ${item.status === 'error' ? 'text-red-500' : item.status === 'done' ? 'text-green-600' : 'text-gray-400'}`}>{item.message}</p>
+                        </div>
+                        <div className="shrink-0">
+                          {item.status === 'done' ? (
+                            <span className="inline-flex items-center gap-1 text-green-600 text-sm font-medium"><Check className="w-4 h-4" /> Xong</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => attachVanDonByOrder(item)}
+                              disabled={busy || !item.driveLink || !item.maDonHang}
+                              className="px-4 py-2 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                            >
+                              {item.status === 'attaching' ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang gắn</>) : busy ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang đọc</>) : 'Gắn'}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex flex-col items-end gap-1.5 shrink-0">
-                        {item.status === 'done' ? (
-                          <span className="inline-flex items-center gap-1 text-green-600 text-sm font-medium"><Check className="w-4 h-4" /> Xong</span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => attachVanDonByOrder(item)}
-                            disabled={busy || !item.driveLink || !item.maDonHang}
-                            className="px-3 py-1.5 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-                          >
-                            {item.status === 'attaching' ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang gắn</>) : busy ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang đọc</>) : 'Gắn'}
-                          </button>
-                        )}
-                        <button type="button" onClick={() => removeVanDonItem(item.id)} className="text-xs text-gray-400 hover:text-red-500">Xoá</button>
+                      {/* Nut Xoa tach han xuong duoi cung, cach xa nut Gan de tranh bam nham */}
+                      <div className="flex justify-end mt-3 pt-2.5 border-t border-gray-200">
+                        <button type="button" onClick={() => removeVanDonItem(item.id)} className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 px-2 py-1">
+                          <Trash2 className="w-3.5 h-3.5" /> Xoá ảnh này
+                        </button>
                       </div>
                     </div>
                   );
