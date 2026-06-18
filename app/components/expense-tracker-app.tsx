@@ -793,7 +793,7 @@ export default function ExpenseTrackerApp() {
         imageUrl: '',
         ngayChi: d.ngayChi || '', phanBo: d.phanBo || '',
         chungTuChi: d.chungTuChi || '',
-        moTaThuongDung: '', dienGiai: d.dienGiai || 'Phí ship quốc tế',
+        moTaThuongDung: '', dienGiai: d.dienGiai || 'Dịch vụ logistics quốc tế',
         vnd: d.vnd || '0', usd: d.usd || '0', rmb: d.rmb || '0',
         soTienGoc: d.soTienGoc || '', loaiTien: d.loaiTien || 'CNY',
         nguonChiPhi: d.nguonChiPhi || 'Internal',

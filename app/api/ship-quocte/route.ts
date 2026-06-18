@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
           cloudStoragePath: '',
           isPublic: false,
           chungTuChi: pkgs[i].maVanDon,
-          dienGiai: 'Phí ship quốc tế',
+          dienGiai: 'Dịch vụ logistics quốc tế',
           vnd: vnd.toString(),
           usd: currency === 'USD' ? feeOrig.toString() : '0',
           rmb: currency === 'CNY' ? feeOrig.toString() : null,
