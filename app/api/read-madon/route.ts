@@ -47,20 +47,36 @@ export async function POST(request: NextRequest) {
             ],
           },
         ],
-        max_tokens: 60,
+        // QUAN TRONG: gemini-2.5-pro la model "thinking" -> phai chua DU token cho ca
+        // phan suy luan noi bo + cau tra loi, neu khong content tra ve RONG. De rong rai.
+        max_tokens: 4096,
+        // Giam suy luan cho tac vu OCR don gian (provider ho tro thi ap, khong thi bo qua).
+        reasoning: { effort: 'low' },
       }),
     });
 
     if (!apiRes.ok) {
       const errText = await apiRes.text().catch(() => '');
-      console.error('read-madon LLM error:', errText.substring(0, 200));
+      console.error('read-madon LLM error:', errText.substring(0, 300));
       return NextResponse.json({ error: 'AI đọc mã thất bại', maDonHang: '' }, { status: 200 });
     }
 
     const data = await apiRes.json();
-    let raw: string = data?.choices?.[0]?.message?.content || '';
-    // Lam sach: giu chu+so, bo khoang trang/ky tu thua (ma don hang khong co dau cach).
-    const maDonHang = String(raw).trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\s+/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const choice = data?.choices?.[0];
+    const raw: string = choice?.message?.content || '';
+    const finish = choice?.finish_reason || '';
+
+    // Trich ma don hang BEN VUNG: lay chuoi chu+so dai nhat (>=6 ky tu) trong cau tra loi,
+    // tranh viec model tra ve kem chu mo ta lam hong ket qua. Ma don Shopee ~14 ky tu.
+    const up = String(raw).toUpperCase();
+    const tokens = up.match(/[A-Z0-9]{6,}/g) || [];
+    const maDonHang = tokens.length ? tokens.sort((a, b) => b.length - a.length)[0] : '';
+
+    if (!maDonHang) {
+      console.warn('read-madon: khong trich duoc ma. finish_reason=', finish, 'content_len=', raw.length, 'preview=', raw.substring(0, 80));
+      // Tra them goi y de UI/log biet ly do (khong chua bi mat).
+      return NextResponse.json({ maDonHang: '', note: `finish_reason=${finish}; len=${raw.length}` });
+    }
 
     return NextResponse.json({ maDonHang });
   } catch (error: any) {
