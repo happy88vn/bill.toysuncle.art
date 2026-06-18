@@ -72,12 +72,19 @@ export async function POST(request: NextRequest) {
           const readData = await readRes.json();
           const values: string[][] = readData?.values || [];
           const updates: { range: string; values: string[][] }[] = [];
+          // Dam bao nhan cot S co san (truong hop sheet chua tung sync 19 cot).
+          const headerRow = values[0] || [];
+          if (!(headerRow[18] && String(headerRow[18]).trim())) {
+            updates.push({ range: `${SHEET_TAB}!${VANDON_COL}1`, values: [['Link Vận đơn (GH)']] });
+          }
           // Bo qua dong 1 (header). So dong tren sheet = index + 1.
+          let matched = 0;
           for (let i = 1; i < values.length; i++) {
             const cell = values[i]?.[MADON_COL_INDEX];
             if (cell && norm(cell) === maDonHang) {
               const rowNum = i + 1;
               updates.push({ range: `${SHEET_TAB}!${VANDON_COL}${rowNum}`, values: [[driveLink]] });
+              matched++;
             }
           }
           if (updates.length > 0) {
@@ -90,7 +97,7 @@ export async function POST(request: NextRequest) {
               }
             );
             if (upRes.ok) {
-              sheetUpdated = updates.length;
+              sheetUpdated = matched; // chi dem dong hoa don khop, khong tinh o header
             } else {
               sheetError = (await upRes.text().catch(() => '')).substring(0, 200);
               console.error('attach-vandon sheet batchUpdate error:', sheetError);
