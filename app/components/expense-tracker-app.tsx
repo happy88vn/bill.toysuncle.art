@@ -164,6 +164,10 @@ export default function ExpenseTrackerApp() {
   const [vanDonUploading, setVanDonUploading] = useState<string | null>(null); // rowId dang upload tren man review
   const [vanDonItems, setVanDonItems] = useState<VanDonItem[]>([]); // panel "gan theo Ma don hang"
 
+  // V12: Che do Ship Quoc Te (cong thuc phi ship phan bo theo trong luong)
+  const [internationalMode, setInternationalMode] = useState(false);
+  const [repImageIndex, setRepImageIndex] = useState<number | null>(null); // anh dai dien (chi luu 1 anh)
+
   // Helper: compute donGia safely (no NaN/Infinity)
   const computeDonGia = (vnd: string, soLuongHang: string): string => {
     const total = parseFloat(vnd) || 0;
@@ -751,6 +755,69 @@ export default function ExpenseTrackerApp() {
     await uploadAndProcess(filesWithNotes, false, setProgress, setIsProcessing);
   };
 
+  // V12: Ship Quoc Te — KHONG upload het anh, gui base64 cho AI tinh phi ship phan bo theo kg.
+  const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const processShipQuocte = async () => {
+    if (filesWithNotes.length === 0) {
+      toast.error('Vui lòng chọn ít nhất 1 hình ảnh (ảnh tổng tiền + ảnh chi tiết trọng lượng)');
+      return;
+    }
+    setIsProcessing(true);
+    setRows([]);
+    setProgress({ current: 0, total: filesWithNotes.length, message: 'AI đang đọc tổng tiền + trọng lượng...' });
+    try {
+      const txRes = await fetch('/api/transactions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ totalImages: filesWithNotes.length }),
+      });
+      if (!txRes.ok) throw new Error('Không thể tạo transaction');
+      const tx = await txRes.json();
+
+      const images = await Promise.all(filesWithNotes.map(async f => ({ base64: await fileToBase64(f.file), mime: f.file.type || 'image/jpeg' })));
+
+      const res = await fetch('/api/ship-quocte', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId: tx.id, images }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Không xử lý được ship quốc tế');
+
+      const newRows: RowData[] = (data.rows || []).map((d: any) => ({
+        id: d.id,
+        imageUrl: '',
+        ngayChi: d.ngayChi || '', phanBo: d.phanBo || '',
+        chungTuChi: d.chungTuChi || '',
+        moTaThuongDung: '', dienGiai: d.dienGiai || 'Phí ship quốc tế',
+        vnd: d.vnd || '0', usd: d.usd || '0', rmb: d.rmb || '0',
+        soTienGoc: d.soTienGoc || '', loaiTien: d.loaiTien || 'CNY',
+        nguonChiPhi: d.nguonChiPhi || 'Internal',
+        soLuongHang: '', donGia: '',
+        ngayNhanHang: '', nguoiChi: '',
+        phanLoai: d.phanLoai || 'LOG', maChiPhi: d.maChiPhi || 'SNV',
+        linkChungTu: '', anhVanDon: '',
+        trangThai: 'Chờ duyệt', recordId: d.recordId || '',
+      }));
+      if (newRows.length === 0) throw new Error('Không tạo được dòng phí ship');
+
+      setRows(newRows);
+      setSelectedIds(new Set(newRows.map(r => r.id)));
+      setRepImageIndex(filesWithNotes.length === 1 ? 0 : null);
+      setStep('review');
+      const sm = data.summary?.map((s: any) => `${s.maVanDon}: ${s.fee}`).join(' · ') || '';
+      toast.success(`Đã tính phí ship cho ${newRows.length} mã vận đơn ${sm ? `(${sm})` : ''}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Lỗi xử lý ship quốc tế');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // V7.1: "Upload thêm ảnh" — appends new rows to existing ones
   const processMoreImages = async () => {
     if (moreFiles.length === 0) {
@@ -945,13 +1012,32 @@ export default function ExpenseTrackerApp() {
   };
 
   const syncToGoogleSheets = async () => {
-    const selectedRows = rows.filter(r => selectedIds.has(r.id));
+    let selectedRows = rows.filter(r => selectedIds.has(r.id));
     if (selectedRows.length === 0) {
       toast.error('Vui lòng chọn ít nhất 1 dòng');
       return;
     }
 
     // V9: NY fallback is allowed for all categories (safe default per taxonomy rules)
+
+    // V12: Ship Quoc Te — chua upload anh. Bat User chon 1 anh dai dien -> upload -> gan link cho moi dong.
+    if (internationalMode && selectedRows.some(r => !r.linkChungTu)) {
+      if (repImageIndex == null || !filesWithNotes[repImageIndex]) {
+        toast.error('Chọn 1 ảnh đại diện để lưu trước khi gửi');
+        return;
+      }
+      setIsSyncing(true);
+      let repLink = '';
+      try {
+        repLink = await uploadToDrive(filesWithNotes[repImageIndex].file, `shipQT_${Date.now()}`);
+      } catch (e: any) {
+        toast.error(e?.message || 'Lỗi upload ảnh đại diện');
+        setIsSyncing(false);
+        return;
+      }
+      setRows(prev => prev.map(r => (!r.linkChungTu ? { ...r, linkChungTu: repLink, imageUrl: repLink } : r)));
+      selectedRows = selectedRows.map(r => (!r.linkChungTu ? { ...r, linkChungTu: repLink, imageUrl: repLink } : r));
+    }
 
     setIsSyncing(true);
     try {
@@ -1055,6 +1141,7 @@ export default function ExpenseTrackerApp() {
     setHasSyncedToSheets(false);
     setProgress({ current: 0, total: 0, message: '' });
     setMoreProgress({ current: 0, total: 0, message: '' });
+    setRepImageIndex(null);
   };
 
   // ====== Manual Entry State ======
@@ -1384,6 +1471,17 @@ export default function ExpenseTrackerApp() {
               Tải lên hình ảnh hóa đơn / biên lai
             </h2>
 
+            {/* V12: Chon che do xu ly */}
+            <div className="flex gap-2 mb-4 p-1 bg-gray-100 rounded-xl">
+              <button type="button" onClick={() => setInternationalMode(false)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${!internationalMode ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoá đơn thường</button>
+              <button type="button" onClick={() => setInternationalMode(true)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${internationalMode ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>🌍 Ship Quốc Tế</button>
+            </div>
+            {internationalMode && (
+              <div className="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-100 text-xs text-blue-800 leading-relaxed">
+                <b>Chế độ Ship Quốc Tế:</b> tải ảnh tổng tiền + ảnh chi tiết gói hàng (có dòng &quot;Trọng lượng thực tế&quot;). Hệ thống tính phí ship phân bổ theo kg cho từng mã vận đơn. Cuối cùng bạn chọn <b>1 ảnh đại diện</b> để lưu (không lưu hết ảnh).
+              </div>
+            )}
+
             <div
               {...getRootProps()}
               className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${
@@ -1475,12 +1573,14 @@ export default function ExpenseTrackerApp() {
 
             {!driveUploadFailed && (
               <button
-                onClick={processImages}
+                onClick={internationalMode ? processShipQuocte : processImages}
                 disabled={isProcessing || filesWithNotes.length === 0}
                 className="mt-6 w-full bg-orange-500 text-white py-4 rounded-xl font-semibold text-lg hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
               >
                 {isProcessing ? (
                   <><Loader2 className="w-5 h-5 animate-spin" /> Đang xử lý...</>
+                ) : internationalMode ? (
+                  `Tính phí ship quốc tế (${filesWithNotes.length} ảnh)`
                 ) : (
                   `Bắt đầu xử lý (${filesWithNotes.length} ảnh)`
                 )}
@@ -1766,6 +1866,21 @@ export default function ExpenseTrackerApp() {
         {/* ====== STEP 2: Review & Edit ====== */}
         {rows.length > 0 && (
           <div className="bg-white rounded-2xl shadow-lg p-6 md:p-8">
+            {/* V12: Ship Quoc Te — chon 1 anh dai dien truoc khi gui */}
+            {internationalMode && rows.some(r => !r.linkChungTu) && filesWithNotes.length > 0 && (
+              <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+                <p className="text-sm font-semibold text-amber-800 mb-1">📸 Chọn 1 ảnh đại diện để lưu</p>
+                <p className="text-xs text-amber-700 mb-3">Phí ship đã tính xong. Chọn 1 ảnh làm chứng từ — chỉ ảnh này được đẩy lên Drive khi bấm Gửi (không lưu hết).</p>
+                <div className="flex flex-wrap gap-3">
+                  {filesWithNotes.map((f, i) => (
+                    <button type="button" key={i} onClick={() => setRepImageIndex(i)} className={`relative w-20 h-20 rounded-lg overflow-hidden border-2 transition-all ${repImageIndex === i ? 'border-orange-500 ring-2 ring-orange-300' : 'border-gray-200 hover:border-orange-300'}`}>
+                      <img src={f.previewUrl} alt={`Ảnh ${i + 1}`} className="w-full h-full object-cover" />
+                      {repImageIndex === i && <span className="absolute top-1 right-1 bg-orange-500 text-white rounded-full w-5 h-5 flex items-center justify-center"><Check className="w-3 h-3" /></span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
               <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                 <Edit3 className="w-5 h-5 text-orange-500" />
