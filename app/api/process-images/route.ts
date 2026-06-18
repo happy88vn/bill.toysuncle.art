@@ -305,7 +305,11 @@ export async function POST(request: NextRequest) {
                   }
                 ],
                 stream: true,
-                max_tokens: 4000
+                // gemini-2.5-pro la model "thinking": phai chua DU token cho ca phan suy luan
+                // + JSON output, neu khong se tra JSON RONG/CUT ("Unexpected end of JSON input").
+                // Giam suy luan (reasoning low) + noi rong token de chac chan co JSON.
+                max_tokens: 8000,
+                reasoning: { effort: 'low' }
               })
             });
 
@@ -326,6 +330,7 @@ export async function POST(request: NextRequest) {
             const decoder = new TextDecoder();
             let buffer = '';
             let partialRead = '';
+            let finishReason = '';
 
             while (true) {
               const { done, value } = await reader.read();
@@ -341,15 +346,18 @@ export async function POST(request: NextRequest) {
                     const parsed = JSON.parse(data);
                     const content = parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.message?.content || '';
                     buffer += content;
+                    if (parsed?.choices?.[0]?.finish_reason) finishReason = parsed.choices[0].finish_reason;
                   } catch (e) { /* skip */ }
                 }
               }
             }
 
-            console.log('AI result:', buffer.substring(0, 500));
+            console.log('AI result:', buffer.substring(0, 500), '| finish_reason:', finishReason);
 
             if (!buffer || buffer.trim().length === 0) {
-              throw new Error('AI không trả về kết quả');
+              // Buffer rong thuong do model thinking ngon het token truoc khi xuat JSON.
+              const hint = finishReason === 'length' ? ' (AI nghĩ quá nhiều, hết token — thử lại)' : '';
+              throw new Error(`AI không trả về kết quả${hint}`);
             }
 
             let cleanBuffer = buffer.trim();
@@ -362,8 +370,18 @@ export async function POST(request: NextRequest) {
             try {
               parsedResult = JSON.parse(cleanBuffer);
             } catch (parseErr: any) {
-              console.error('JSON parse error:', parseErr?.message, 'Raw:', cleanBuffer.substring(0, 300));
-              throw new Error(`AI trả về JSON không hợp lệ: ${parseErr?.message}`);
+              // Cuu JSON: cat tu '[' dau den ']' cuoi (bo chu thua/rac quanh mang).
+              const s = cleanBuffer.indexOf('[');
+              const e = cleanBuffer.lastIndexOf(']');
+              let salvaged = false;
+              if (s !== -1 && e > s) {
+                try { parsedResult = JSON.parse(cleanBuffer.slice(s, e + 1)); salvaged = true; } catch { /* van loi */ }
+              }
+              if (!salvaged) {
+                console.error('JSON parse error:', parseErr?.message, '| finish:', finishReason, '| Raw:', cleanBuffer.substring(0, 300));
+                const hint = finishReason === 'length' ? ' (AI bị cắt do hết token — thử lại)' : '';
+                throw new Error(`AI trả về JSON không hợp lệ${hint}: ${parseErr?.message}`);
+              }
             }
 
             // Ensure result is always an array
