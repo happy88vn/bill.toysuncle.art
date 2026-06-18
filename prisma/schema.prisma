@@ -91,6 +91,7 @@ model ExtractedData {
   phanLoai           String?
   maChiPhi           String?
   linkChungTu        String?
+  anhVanDon          String?
   trangThai          String?     @default("Chờ duyệt")
   recordId           String?
   rawData            String?

@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     const errors: string[] = [];
 
     for (const row of editedRows) {
-      const { id, ngayChi, phanBo, chungTuChi, moTaThuongDung, dienGiai, vnd, soTienGoc, loaiTien, nguonChiPhi, soLuongHang, donGia, ngayNhanHang, nguoiChi, phanLoai, maChiPhi, linkChungTu, trangThai, recordId } = row;
+      const { id, ngayChi, phanBo, chungTuChi, moTaThuongDung, dienGiai, vnd, soTienGoc, loaiTien, nguonChiPhi, soLuongHang, donGia, ngayNhanHang, nguoiChi, phanLoai, maChiPhi, linkChungTu, anhVanDon, trangThai, recordId } = row;
 
       // Update DB — wrapped in try/catch so one failure doesn't block others
       try {
@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
             phanLoai: phanLoai || null,
             maChiPhi: maChiPhi || null,
             linkChungTu: linkChungTu || null,
+            anhVanDon: anhVanDon || null,
             trangThai: trangThai || 'Chờ duyệt',
             recordId: recordId || null,
             status: 'synced',
@@ -67,10 +68,11 @@ export async function POST(request: NextRequest) {
       // V7.1: Use moTaThuongDung or dienGiai as effective description for the sheet
       const effectiveDienGiai = moTaThuongDung || dienGiai || '';
 
-      // 18-column row: Ngày chi, Phân bổ, Chứng từ mua hàng, Mô tả thường dùng, Mô Tả Mới, Tổng Bill (VNĐ),
+      // 19-column row: Ngày chi, Phân bổ, Chứng từ mua hàng, Mô tả thường dùng, Mô Tả Mới, Tổng Bill (VNĐ),
       //   Số tiền gốc, Loại tiền, Số lượng hàng, Đơn giá, Ngày nhận hàng,
       //   Nguồn chi phí, Người chi, Phân loại chi phí, Loại chứng từ, Link Chứng từ,
-      //   Trạng thái duyệt, Record ID
+      //   Trạng thái duyệt, Record ID, Link Vận đơn (GH)
+      // LUU Y: Link Van Don dat o CUOI (cot S) de KHONG lam lech cac dong 18 cot da sync truoc do.
       rows.push([
         ngayChi || '',
         phanBo || '',
@@ -90,30 +92,32 @@ export async function POST(request: NextRequest) {
         linkChungTu || '',
         trangThai || 'Chờ duyệt',
         recordId || '',
+        anhVanDon || '',
       ]);
     }
 
     // ===== AUTO-HEADER: Check if row 1 is empty, insert header if needed =====
-    // V7.1: 18-column header
+    // V11: 19-column header (them "Link Vận đơn (GH)" o cuoi)
     const HEADER_ROW = [
       'Ngày chi', 'Phân bổ', 'Chứng từ mua hàng', 'Mô tả thường dùng', 'Mô Tả Mới',
       'Tổng Bill (VNĐ)', 'Số tiền gốc', 'Loại tiền', 'Số lượng hàng', 'Đơn giá', 'Ngày nhận hàng',
       'Nguồn chi phí', 'Người chi', 'Phân loại chi phí', 'Loại chứng từ',
-      'Link Chứng từ', 'Trạng thái duyệt', 'Record ID'
+      'Link Chứng từ', 'Trạng thái duyệt', 'Record ID', 'Link Vận đơn (GH)'
     ];
 
     try {
       const headerCheckRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(SHEET_TAB)}!A1:R1`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(SHEET_TAB)}!A1:S1`,
         { headers: { 'Authorization': `Bearer ${accessToken}` } }
       );
 
       let needsHeader = true;
+      let existingHeader: string[] | undefined;
       if (headerCheckRes.ok) {
         const headerData = await headerCheckRes.json();
-        const existingRow = headerData?.values?.[0];
+        existingHeader = headerData?.values?.[0];
         // If row 1 has any data, assume header exists
-        if (existingRow && existingRow.length > 0 && existingRow.some((c: string) => c && c.trim())) {
+        if (existingHeader && existingHeader.length > 0 && existingHeader.some((c: string) => c && c.trim())) {
           needsHeader = false;
         }
       }
@@ -121,7 +125,7 @@ export async function POST(request: NextRequest) {
       if (needsHeader) {
         console.log('Sheet header missing — inserting header row');
         const headerRes = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(SHEET_TAB)}!A1:R1?valueInputOption=RAW`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(SHEET_TAB)}!A1:S1?valueInputOption=RAW`,
           {
             method: 'PUT',
             headers: {
@@ -134,6 +138,17 @@ export async function POST(request: NextRequest) {
         if (!headerRes.ok) {
           console.error('Failed to insert header row:', await headerRes.text());
         }
+      } else if (!existingHeader || existingHeader.length < 19 || !(existingHeader[18] && existingHeader[18].trim())) {
+        // Sheet co san header 18 cot tu sync truoc -> bo sung nhan cot S "Link Vận đơn (GH)".
+        const s1Res = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(SHEET_TAB)}!S1?valueInputOption=RAW`,
+          {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: [['Link Vận đơn (GH)']] })
+          }
+        );
+        if (!s1Res.ok) console.error('Failed to add S1 header:', await s1Res.text());
       }
     } catch (headerErr: any) {
       console.error('Header check/insert error (non-fatal):', headerErr?.message);

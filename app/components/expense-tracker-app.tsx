@@ -110,6 +110,7 @@ interface RowData {
   phanLoai: string;
   maChiPhi: string;
   linkChungTu: string;
+  anhVanDon: string;
   trangThai: string;
   recordId: string;
 }
@@ -124,6 +125,16 @@ interface FileWithNote {
   file: File;
   note: string;
   previewUrl: string;
+}
+
+// V11: 1 anh van don trong panel "Gan theo Ma don hang"
+interface VanDonItem {
+  id: string;
+  previewUrl: string;
+  driveLink: string;
+  maDonHang: string;
+  status: 'uploading' | 'reading' | 'ready' | 'attaching' | 'done' | 'error';
+  message: string;
 }
 
 export default function ExpenseTrackerApp() {
@@ -148,6 +159,10 @@ export default function ExpenseTrackerApp() {
   const [isProcessingMore, setIsProcessingMore] = useState(false);
   const [driveUploadFailed, setDriveUploadFailed] = useState(false);
   const [moreProgress, setMoreProgress] = useState({ current: 0, total: 0, message: '' });
+
+  // V11: Anh van don (chung tu giao hang)
+  const [vanDonUploading, setVanDonUploading] = useState<string | null>(null); // rowId dang upload tren man review
+  const [vanDonItems, setVanDonItems] = useState<VanDonItem[]>([]); // panel "gan theo Ma don hang"
 
   // Helper: compute donGia safely (no NaN/Infinity)
   const computeDonGia = (vnd: string, soLuongHang: string): string => {
@@ -425,6 +440,100 @@ export default function ExpenseTrackerApp() {
     return data.viewLink || '';
   };
 
+  // ===== V11: Anh van don / chung tu giao hang =====
+  // (A) Dinh kem tren man review: upload + gan cho dong nay + moi dong cung Ma don.
+  const attachVanDonToRow = async (row: RowData, file: File) => {
+    if (!file) return;
+    setVanDonUploading(row.id);
+    try {
+      const baseId = getBaseRecordId(row.recordId);
+      const safe = (row.chungTuChi || row.recordId || 'vandon').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
+      const link = await uploadToDrive(file, `${safe}_vandon_${Date.now()}`);
+      setRows(prev => prev.map(r => {
+        const sameRow = r.id === row.id;
+        const sameOrder = !!baseId && getBaseRecordId(r.recordId) === baseId;
+        return (sameRow || sameOrder) ? { ...r, anhVanDon: link } : r;
+      }));
+      toast.success('Đã đính kèm ảnh vận đơn vào hóa đơn');
+    } catch (e: any) {
+      toast.error(e?.message || 'Lỗi tải ảnh vận đơn');
+    } finally {
+      setVanDonUploading(null);
+    }
+  };
+
+  const updateVanDonItem = (id: string, patch: Partial<VanDonItem>) => {
+    setVanDonItems(prev => prev.map(it => (it.id === id ? { ...it, ...patch } : it)));
+  };
+
+  const removeVanDonItem = (id: string) => {
+    setVanDonItems(prev => {
+      const it = prev.find(x => x.id === id);
+      if (it?.previewUrl) URL.revokeObjectURL(it.previewUrl);
+      return prev.filter(x => x.id !== id);
+    });
+  };
+
+  // (B) Panel "Gan theo Ma don hang": upload anh -> OCR doc Ma don -> Sep xac nhan -> gan.
+  const onPickVanDonFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    for (const file of files) {
+      const id = generateRecordId();
+      const previewUrl = URL.createObjectURL(file);
+      setVanDonItems(prev => [...prev, { id, previewUrl, driveLink: '', maDonHang: '', status: 'uploading', message: 'Đang tải ảnh lên Drive...' }]);
+      try {
+        const link = await uploadToDrive(file, `vandon_${Date.now()}_${id}`);
+        updateVanDonItem(id, { driveLink: link, status: 'reading', message: 'Đang đọc Mã đơn hàng...' });
+        let ma = '';
+        try {
+          const res = await fetch('/api/read-madon', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ driveLink: link }),
+          });
+          const data = await res.json().catch(() => ({}));
+          ma = data?.maDonHang || '';
+        } catch { /* OCR loi -> nhap tay */ }
+        updateVanDonItem(id, {
+          maDonHang: ma,
+          status: 'ready',
+          message: ma ? 'Đã đọc mã — kiểm tra rồi bấm Gắn' : 'Không đọc được mã — nhập tay rồi bấm Gắn',
+        });
+      } catch (e: any) {
+        updateVanDonItem(id, { status: 'error', message: e?.message || 'Lỗi tải ảnh lên Drive' });
+      }
+    }
+  };
+
+  const attachVanDonByOrder = async (item: VanDonItem) => {
+    const ma = (item.maDonHang || '').trim();
+    if (!item.driveLink) { toast.error('Ảnh chưa tải lên xong'); return; }
+    if (!ma) { toast.error('Chưa có Mã đơn hàng để gắn'); return; }
+    updateVanDonItem(item.id, { status: 'attaching', message: 'Đang gắn vào hóa đơn...' });
+    try {
+      const res = await fetch('/api/attach-vandon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveLink: item.driveLink, maDonHang: ma }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Lỗi gắn vận đơn');
+      if (data.success) {
+        updateVanDonItem(item.id, { status: 'done', message: data.message || 'Đã gắn xong' });
+        toast.success(data.message || 'Đã gắn ảnh vận đơn');
+        // Neu hoa don dang hien tren man review -> cap nhat luon
+        setRows(prev => prev.map(r => (r.chungTuChi && r.chungTuChi.trim().toUpperCase() === ma.toUpperCase() ? { ...r, anhVanDon: item.driveLink } : r)));
+      } else {
+        updateVanDonItem(item.id, { status: 'ready', message: data.message || 'Không tìm thấy hóa đơn khớp mã' });
+        toast.error(data.message || 'Không tìm thấy hóa đơn khớp mã này');
+      }
+    } catch (e: any) {
+      updateVanDonItem(item.id, { status: 'ready', message: e?.message || 'Lỗi gắn vận đơn' });
+      toast.error(e?.message || 'Lỗi gắn vận đơn');
+    }
+  };
+
   // Anh bill luu link Drive (private) -> hien qua proxy /api/drive-image.
   // blob:/data: (preview luc moi chon anh) thi giu nguyen.
   const driveImgSrc = (url: string | null | undefined): string => {
@@ -465,6 +574,7 @@ export default function ExpenseTrackerApp() {
       phanLoai: PHAN_LOAI_OPTIONS.includes(d.phanLoai) ? d.phanLoai : 'SX',
       maChiPhi: d.maChiPhi || getDefaultMaChiPhi(d.phanLoai || 'SX'),
       linkChungTu: d.linkChungTu || '',
+      anhVanDon: d.anhVanDon || '',
       trangThai: 'Chờ duyệt',
       recordId: d.recordId || '',
     };
@@ -1093,6 +1203,7 @@ export default function ExpenseTrackerApp() {
         phanLoai: savedData.phanLoai || 'SX',
         maChiPhi: savedData.maChiPhi || 'NY',
         linkChungTu: savedData.linkChungTu || '',
+        anhVanDon: savedData.anhVanDon || '',
         trangThai: 'Đã duyệt',
         recordId: savedData.recordId || '',
       };
@@ -1572,6 +1683,67 @@ export default function ExpenseTrackerApp() {
               </button>
             </div>
           </div>
+
+          {/* V11: Panel gan anh van don theo Ma don hang (hoa don da nhap truoc do) */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 md:p-8 mt-6">
+            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-1">
+              <span>📦</span> Gắn ảnh vận đơn vào hóa đơn đã nhập
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Tải tem giao hàng (SPX, GHTK...) — hệ thống tự đọc <b>Mã đơn hàng</b> trên tem rồi gắn ảnh vào đúng hóa đơn (khớp theo mã, cập nhật cả Google Sheets). Dùng khi bill đã lưu trước đó.
+            </p>
+
+            <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-gray-300 text-sm text-gray-600 hover:border-orange-400 hover:text-orange-600 cursor-pointer transition-colors">
+              <Upload className="w-4 h-4" /> Chọn ảnh tem vận đơn
+              <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const fl = e.target.files; const el = e.currentTarget; onPickVanDonFiles(fl); el.value = ''; }} />
+            </label>
+
+            {vanDonItems.length > 0 && (
+              <div className="mt-4 space-y-3">
+                {vanDonItems.map(item => {
+                  const busy = item.status === 'uploading' || item.status === 'reading' || item.status === 'attaching';
+                  return (
+                    <div key={item.id} className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
+                      <button type="button" onClick={() => item.driveLink && setLightboxUrl(driveImgSrc(item.driveLink))} className="shrink-0">
+                        <img src={item.driveLink ? driveImgSrc(item.driveLink) : item.previewUrl} alt="Tem vận đơn" className="w-16 h-16 object-cover rounded-lg border border-gray-200 hover:opacity-80" />
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Mã đơn hàng</label>
+                        <input
+                          type="text"
+                          list="recent-madon-list"
+                          value={item.maDonHang}
+                          disabled={busy || item.status === 'done'}
+                          onChange={(e) => updateVanDonItem(item.id, { maDonHang: e.target.value })}
+                          placeholder="VD: 2606169D8SAA8U"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:border-orange-400 focus:ring-1 focus:ring-orange-400 outline-none disabled:bg-gray-100"
+                        />
+                        <p className={`text-xs mt-1 ${item.status === 'error' ? 'text-red-500' : item.status === 'done' ? 'text-green-600' : 'text-gray-400'}`}>{item.message}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        {item.status === 'done' ? (
+                          <span className="inline-flex items-center gap-1 text-green-600 text-sm font-medium"><Check className="w-4 h-4" /> Xong</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => attachVanDonByOrder(item)}
+                            disabled={busy || !item.driveLink || !item.maDonHang}
+                            className="px-3 py-1.5 rounded-lg bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                          >
+                            {item.status === 'attaching' ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang gắn</>) : busy ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang đọc</>) : 'Gắn'}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => removeVanDonItem(item.id)} className="text-xs text-gray-400 hover:text-red-500">Xoá</button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <datalist id="recent-madon-list">
+                  {recentOrders.filter(o => o.chungTuChi).map((o, i) => <option key={i} value={o.chungTuChi || ''} />)}
+                </datalist>
+              </div>
+            )}
+          </div>
         </>)}
 
         {/* ====== STEP 2: Review & Edit ====== */}
@@ -1864,6 +2036,33 @@ export default function ExpenseTrackerApp() {
                             </a>
                           </div>
                         )}
+
+                        {/* V11: Anh van don / chung tu giao hang (cung dong hoa don) */}
+                        <div className="mt-4 pt-3 border-t border-gray-100">
+                          <label className="block text-xs font-medium text-gray-500 mb-1.5">Ảnh vận đơn / Chứng từ giao hàng</label>
+                          {row.anhVanDon ? (
+                            <div className="flex items-center gap-3">
+                              <button type="button" onClick={() => setLightboxUrl(driveImgSrc(row.anhVanDon))} className="shrink-0">
+                                <img src={driveImgSrc(row.anhVanDon)} alt="Ảnh vận đơn" className="w-14 h-14 object-cover rounded-lg border border-gray-200 hover:opacity-80" />
+                              </button>
+                              <div className="flex flex-col gap-1">
+                                <a href={row.anhVanDon} target="_blank" rel="noopener noreferrer" className="text-sm text-orange-600 hover:underline flex items-center gap-1">
+                                  <ExternalLink className="w-3.5 h-3.5" /> Xem ảnh vận đơn
+                                </a>
+                                <label className="text-xs text-gray-400 hover:text-orange-600 cursor-pointer">
+                                  Đổi ảnh khác
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; const el = e.currentTarget; if (f) attachVanDonToRow(row, f); el.value = ''; }} />
+                                </label>
+                              </div>
+                            </div>
+                          ) : (
+                            <label className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed text-sm transition-colors ${vanDonUploading === row.id ? 'opacity-60 pointer-events-none border-gray-300 text-gray-500' : 'border-gray-300 text-gray-600 hover:border-orange-400 hover:text-orange-600 cursor-pointer'}`}>
+                              {vanDonUploading === row.id ? (<><Loader2 className="w-4 h-4 animate-spin" /> Đang tải lên...</>) : (<>📎 Đính kèm ảnh vận đơn</>)}
+                              <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; const el = e.currentTarget; if (f) attachVanDonToRow(row, f); el.value = ''; }} />
+                            </label>
+                          )}
+                          <p className="text-[11px] text-gray-400 mt-1.5">Ảnh tem giao hàng (SPX, GHTK...) lưu làm chứng từ thuế — tự gắn cho mọi dòng cùng đơn.</p>
+                        </div>
                       </div>
                     )}
                   </div>
