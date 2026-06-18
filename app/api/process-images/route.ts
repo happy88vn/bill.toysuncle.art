@@ -85,11 +85,16 @@ BẮT BUỘC: Kết quả đầu ra phải là một JSON **Array** (mảng). M�
 
 **KỊCH BẢN 1: HÓA ĐƠN VND / NỘI ĐỊA** (Shopee, Lazada, Tiki, hóa đơn Việt Nam):
 - Mỗi sản phẩm KHÁC NHAU → MỘT Object riêng. Chỉ có 1 sản phẩm → 1 Object. KHÔNG tạo dòng riêng cho voucher/giảm giá/phí ship.
-- **SoTienGoc của MỖI Object = GIÁ LISTING RIÊNG của dòng đó** (số tiền hiển thị NGAY CẠNH sản phẩm đó). TUYỆT ĐỐI KHÔNG chia đều, KHÔNG dùng tổng bill — giá mỗi sản phẩm THƯỜNG KHÁC NHAU.
-- **TongThanhToan = số tiền THỰC TRẢ cuối cùng của cả hóa đơn** (dòng "Thành tiền"/"Tổng thanh toán"), GHI GIỐNG NHAU cho MỌI Object. Backend tự phân bổ phần giảm giá theo TỶ LỆ giá trị từng dòng. Nếu không có giảm giá → TongThanhToan = tổng các dòng.
+- ⚠️ TRÊN 1 BILL THƯỜNG CÓ NHIỀU CON SỐ GIÁ — PHẢI PHÂN BIỆT RÕ:
+  + Giá gốc GẠCH NGANG (vd 399.000đ có nét gạch xuyên qua) → BỎ QUA, tuyệt đối không dùng.
+  + Giá sau giảm của shop, hiển thị NGAY CẠNH sản phẩm (vd 295.000đ) → đây là **SoTienGoc** (giá listing của dòng đó).
+  + Dòng "Thành tiền" / "Tổng thanh toán" / "Tổng cộng" / "Số tiền thanh toán" (vd 257.200đ) → đây là **TongThanhToan = SỐ TIỀN THỰC TRẢ**, là NGUỒN SỰ THẬT về số tiền đã chi. Thường NHỎ HƠN giá listing (vì trừ thêm voucher sàn / xu / mã giảm) và thường nằm CUỐI hoặc có nhãn "Thành tiền".
+- **SoTienGoc của MỖI Object = GIÁ LISTING RIÊNG của dòng đó** (số cạnh sản phẩm). TUYỆT ĐỐI KHÔNG chia đều, KHÔNG dùng tổng bill — giá mỗi sản phẩm THƯỜNG KHÁC NHAU.
+- **TongThanhToan = số "Thành tiền"/"Tổng thanh toán" thực trả của CẢ hóa đơn**, GHI GIỐNG NHAU cho MỌI Object. BẮT BUỘC điền nếu nhìn thấy — KỂ CẢ bill chỉ có 1 sản phẩm. Backend tự phân bổ giảm giá theo TỶ LỆ giá trị từng dòng để ra đơn giá thực. Chỉ khi thật sự không có dòng tổng riêng → TongThanhToan = tổng các dòng.
 - SoLuongHang = số lượng riêng của dòng đó. DienGiai = tên sản phẩm CỤ THỂ (đọc đúng tên trên bill).
 - Dùng TÊN CỬA HÀNG + hình ảnh sản phẩm để hiểu đúng mặt hàng rồi đặt DienGiai cho chuẩn. VD cửa hàng "Sơn Duy Auto Win" + hình các hộp/lọ sơn → đây là SƠN nhiều loại/màu → "Sơn lót 2K trắng", "Sơn lót 2K đen"...
-- Ví dụ: Bill "Sơn Duy Auto Win", Thành tiền 340.300đ, gồm Sơn lót trắng x1 (150.000đ), Sơn lót đen x1 (150.000đ), Sơn DD75 x1 (60.000đ), Sơn mờ x1 (50.000đ) → 4 Object: SoTienGoc lần lượt "150000","150000","60000","50000", TongThanhToan="340300" cho cả 4. (Backend tự ra đơn giá sau giảm 124500/124500/49800/41500.)
+- VÍ DỤ BILL 1 SẢN PHẨM (Shopee): cửa hàng "Kmart Store", "Ổ cắm WIFI TP-Link Tapo P110M", giá gạch ngang 399.000đ, giá 295.000đ, Thành tiền 257.200đ → 1 Object: {DienGiai:"Ổ cắm WIFI Tapo P110M", SoTienGoc:"295000", TongThanhToan:"257200", SoLuongHang:"1", LoaiTien:"VND"}. (Backend ra đơn giá thực = 257.200, KHÔNG phải 295.000.)
+- VÍ DỤ NHIỀU SẢN PHẨM: Bill "Sơn Duy Auto Win", Thành tiền 340.300đ, gồm Sơn lót trắng x1 (150.000đ), Sơn lót đen x1 (150.000đ), Sơn DD75 x1 (60.000đ), Sơn mờ x1 (50.000đ) → 4 Object: SoTienGoc lần lượt "150000","150000","60000","50000", TongThanhToan="340300" cho cả 4. (Backend tự ra đơn giá sau giảm 124500/124500/49800/41500.)
 
 **KỊCH BẢN 2: HÓA ĐƠN NGOẠI TỆ** (1688, Taobao, Alibaba, Amazon, eBay, invoice USD/CNY/EUR...):
 - Mỗi sản phẩm/dịch vụ trên hóa đơn = MỘT object riêng trong mảng.
@@ -125,7 +130,7 @@ Mỗi object trong mảng phải có chính xác các key sau:
 
 "SoTienGoc": Số tiền GỐC của dòng này theo đơn vị tiền tệ trên hóa đơn. (Chỉ ghi số, có thể âm cho voucher). Nếu là VND → ghi số nguyên (46420, KHÔNG phải 46.42).
 
-"TongThanhToan": (CHỈ cho hóa đơn VND) Tổng số tiền THỰC TRẢ cuối cùng của cả hóa đơn (dòng "Thành tiền"/"Tổng thanh toán"). Ghi số nguyên, GIỐNG NHAU cho mọi object trong bill. Nếu không tìm thấy → "".
+"TongThanhToan": (CHỈ cho hóa đơn VND) Tổng số tiền THỰC TRẢ cuối cùng của cả hóa đơn (dòng "Thành tiền"/"Tổng thanh toán"/"Tổng cộng"/"Số tiền thanh toán"). BẮT BUỘC điền kể cả bill chỉ 1 sản phẩm. Đây là số tiền dùng để tính chi phí thực — KHÔNG dùng giá listing/giá gạch ngang. Ghi số nguyên, GIỐNG NHAU cho mọi object trong bill. Nếu không tìm thấy → "".
 
 "LoaiTien": Mã tiền tệ ISO 3 chữ cái: VND, USD, CNY, EUR, GBP, JPY, AUD, CAD, CHF, DKK, HKD, INR, KRW, KWD, MYR, NOK, RUB, SAR, SEK, SGD, THB. Mặc định "VND" nếu là tiền Việt (₫, đ, VNĐ). USD nếu có $. CNY nếu có ¥, 元, Tệ.
 
@@ -437,24 +442,32 @@ export async function POST(request: NextRequest) {
             // de tong cac dong = dung so tien thuc tra. Khong co giam gia -> giu nguyen listing.
             const firstLoaiTien = sanitizeNullableStr(lineItems[0]?.LoaiTien) || 'VND';
             let vndAllocMap: Map<number, number> | null = null;
-            if (firstLoaiTien === 'VND' && lineItems.length > 1) {
+            // V11: TIEN THUC TRA (TongThanhToan = "Thanh tien"/"Tong thanh toan") la NGUON SU THAT.
+            // Ap dung cho CA bill 1 dong (vd Shopee: gia listing 295k nhung thuc tra 257.2k).
+            // Phan bo so thuc tra cho tung dong theo ti le gia listing; bill 1 dong -> nhan het.
+            if (firstLoaiTien === 'VND') {
               const paidTotal = parseInt(sanitizeVndInteger(lineItems[0]?.TongThanhToan || '0'), 10) || 0;
               const listed: number[] = lineItems.map((li: any) => parseInt(sanitizeVndInteger(li?.SoTienGoc), 10) || 0);
               const subtotal = listed.reduce((a, b) => a + b, 0);
-              const ratio = subtotal > 0 ? paidTotal / subtotal : 0;
-              // Chi ap khi co TongThanhToan hop le va ti le trong khoang an toan (0.2..2).
-              if (paidTotal > 0 && subtotal > 0 && ratio >= 0.2 && ratio <= 2) {
-                vndAllocMap = new Map();
-                let allocated = 0;
-                for (let k = 0; k < listed.length; k++) {
-                  if (k === listed.length - 1) {
-                    vndAllocMap.set(k, paidTotal - allocated); // dong cuoi lay phan du -> tong khop tuyet doi
-                  } else {
-                    const share = Math.round(listed[k] * ratio);
-                    vndAllocMap.set(k, share);
-                    allocated += share;
+              if (paidTotal > 0 && subtotal > 0) {
+                const ratio = paidTotal / subtotal;
+                // Ti le an toan: thuc tra hop ly so voi tong listing (giam toi -80%, phu toi 2x).
+                if (ratio >= 0.2 && ratio <= 2) {
+                  vndAllocMap = new Map();
+                  let allocated = 0;
+                  for (let k = 0; k < listed.length; k++) {
+                    if (k === listed.length - 1) {
+                      vndAllocMap.set(k, paidTotal - allocated); // dong cuoi lay phan du -> tong khop tuyet doi
+                    } else {
+                      const share = Math.round(listed[k] * ratio);
+                      vndAllocMap.set(k, share);
+                      allocated += share;
+                    }
                   }
                 }
+              } else if (paidTotal > 0 && subtotal === 0 && lineItems.length === 1) {
+                // Chi doc duoc tong thuc tra, khong co gia tung dong -> dat het cho dong duy nhat.
+                vndAllocMap = new Map([[0, paidTotal]]);
               }
             }
 
