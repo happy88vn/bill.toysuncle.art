@@ -6,8 +6,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { appendToChungTuLog } from '@/lib/chungtu-log';
-
-const SHEET_TAB = 'DuLieuChiPhiTongQuat';
+import { buildSheetRow, SHEET_HEADER, SHEET_TAB } from '@/lib/sheet-row';
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,48 +61,12 @@ export async function POST(request: NextRequest) {
         errors.push(`Row ${recordId || id}: ${dbErr?.message || 'DB update failed'}`);
       }
 
-      // Prefix chungTuChi with ' for text format in Google Sheets
-      const chungTuChiSheet = chungTuChi ? `'${chungTuChi}` : '';
-
-      // V7.1: Use moTaThuongDung or dienGiai as effective description for the sheet
-      const effectiveDienGiai = moTaThuongDung || dienGiai || '';
-
-      // 19-column row: Ngày chi, Phân bổ, Chứng từ mua hàng, Mô tả thường dùng, Mô Tả Mới, Tổng Bill (VNĐ),
-      //   Số tiền gốc, Loại tiền, Số lượng hàng, Đơn giá, Ngày nhận hàng,
-      //   Nguồn chi phí, Người chi, Phân loại chi phí, Loại chứng từ, Link Chứng từ,
-      //   Trạng thái duyệt, Record ID, Link Vận đơn (GH)
-      // LUU Y: Link Van Don dat o CUOI (cot S) de KHONG lam lech cac dong 18 cot da sync truoc do.
-      rows.push([
-        ngayChi || '',
-        phanBo || '',
-        chungTuChiSheet,
-        moTaThuongDung || '',
-        dienGiai || '',
-        vnd || '0',
-        soTienGoc || '',
-        loaiTien || 'VND',
-        soLuongHang || '',
-        donGia || '',
-        ngayNhanHang || '',
-        nguonChiPhi || 'Internal',
-        nguoiChi || '',
-        phanLoai || '',
-        maChiPhi || '',
-        linkChungTu || '',
-        trangThai || 'Chờ duyệt',
-        recordId || '',
-        anhVanDon || '',
-      ]);
+      // 1 dong 19 cot dung dinh dang (helper dung chung voi update-row).
+      rows.push(buildSheetRow({ ngayChi, phanBo, chungTuChi, moTaThuongDung, dienGiai, vnd, soTienGoc, loaiTien, soLuongHang, donGia, ngayNhanHang, nguonChiPhi, nguoiChi, phanLoai, maChiPhi, linkChungTu, trangThai, recordId, anhVanDon }));
     }
 
     // ===== AUTO-HEADER: Check if row 1 is empty, insert header if needed =====
-    // V11: 19-column header (them "Link Vận đơn (GH)" o cuoi)
-    const HEADER_ROW = [
-      'Ngày chi', 'Phân bổ', 'Chứng từ mua hàng', 'Mô tả thường dùng', 'Mô Tả Mới',
-      'Tổng Bill (VNĐ)', 'Số tiền gốc', 'Loại tiền', 'Số lượng hàng', 'Đơn giá', 'Ngày nhận hàng',
-      'Nguồn chi phí', 'Người chi', 'Phân loại chi phí', 'Loại chứng từ',
-      'Link Chứng từ', 'Trạng thái duyệt', 'Record ID', 'Link Vận đơn (GH)'
-    ];
+    const HEADER_ROW = SHEET_HEADER;
 
     try {
       const headerCheckRes = await fetch(

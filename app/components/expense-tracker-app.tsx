@@ -168,6 +168,14 @@ export default function ExpenseTrackerApp() {
   const [internationalMode, setInternationalMode] = useState(false);
   const [repImageIndex, setRepImageIndex] = useState<number | null>(null); // anh dai dien (chi luu 1 anh)
 
+  // V13: Sua lenh da gui (tim tren Sheet -> nap vao review -> ghi de / xoa theo Record ID)
+  const [editingSubmitted, setEditingSubmitted] = useState(false);
+  const [showFinder, setShowFinder] = useState(false);
+  const [finderQuery, setFinderQuery] = useState('');
+  const [finderResults, setFinderResults] = useState<any[]>([]);
+  const [finderLoading, setFinderLoading] = useState(false);
+  const [finderSelected, setFinderSelected] = useState<Set<string>>(new Set());
+
   // Helper: compute donGia safely (no NaN/Infinity)
   const computeDonGia = (vnd: string, soLuongHang: string): string => {
     const total = parseFloat(vnd) || 0;
@@ -980,6 +988,31 @@ export default function ExpenseTrackerApp() {
     const rowToDelete = rows.find(r => r.id === id);
     if (!rowToDelete) return;
 
+    // V13: Che do sua lenh da gui -> XOA HAN tren Sheet + DB + Drive (qua route).
+    if (editingSubmitted) {
+      if (!window.confirm(`Xoá hẳn lệnh "${rowToDelete.chungTuChi || rowToDelete.dienGiai || rowToDelete.recordId}" khỏi Google Sheets? Không hoàn tác được.`)) return;
+      setDeletingRowId(id);
+      try {
+        const res = await fetch('/api/google-sheets/delete-row', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: rowToDelete.id, recordId: rowToDelete.recordId, linkChungTu: rowToDelete.linkChungTu }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+          toast.success(data.message || 'Đã xoá lệnh');
+          setRows(prev => prev.filter(r => r.id !== id));
+          setSelectedIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+        } else {
+          toast.error(data?.error || 'Lỗi xoá lệnh');
+        }
+      } catch (e: any) {
+        toast.error(e?.message || 'Lỗi xoá lệnh');
+      } finally {
+        setDeletingRowId(null);
+      }
+      return;
+    }
+
     const remaining = rows.filter(r => r.id !== id);
 
     // V7.9: Check if last row with this base Record ID — if so, AWAIT Drive delete
@@ -1009,6 +1042,91 @@ export default function ExpenseTrackerApp() {
   const selectAll = () => {
     if (selectedIds.size === rows.length) setSelectedIds(new Set());
     else setSelectedIds(new Set(rows.map(r => r.id)));
+  };
+
+  // ===== V13: SUA LENH DA GUI =====
+  const loadSyncedEntries = async (q: string) => {
+    setFinderLoading(true);
+    try {
+      const res = await fetch(`/api/synced-entries?q=${encodeURIComponent(q)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Lỗi tải danh sách');
+      setFinderResults(data.rows || []);
+    } catch (e: any) {
+      toast.error(e?.message || 'Lỗi tải danh sách lệnh đã gửi');
+      setFinderResults([]);
+    } finally {
+      setFinderLoading(false);
+    }
+  };
+
+  const openFinder = () => {
+    setShowFinder(true);
+    setFinderQuery('');
+    setFinderSelected(new Set());
+    loadSyncedEntries('');
+  };
+
+  const toggleFinderSelect = (recordId: string) => {
+    setFinderSelected(prev => { const n = new Set(prev); n.has(recordId) ? n.delete(recordId) : n.add(recordId); return n; });
+  };
+
+  const openSelectedForEdit = () => {
+    const chosen = finderResults.filter(r => finderSelected.has(r.recordId));
+    if (chosen.length === 0) { toast.error('Chọn ít nhất 1 lệnh để sửa'); return; }
+    const newRows: RowData[] = chosen.map((d: any) => ({
+      id: d.recordId,
+      imageUrl: d.linkChungTu || '',
+      ngayChi: d.ngayChi || '', phanBo: d.phanBo || '',
+      chungTuChi: d.chungTuChi || '', moTaThuongDung: d.moTaThuongDung || '', dienGiai: d.dienGiai || '',
+      vnd: d.vnd || '0', usd: '0', rmb: '0',
+      soTienGoc: d.soTienGoc || '', loaiTien: d.loaiTien || 'VND',
+      nguonChiPhi: d.nguonChiPhi || 'Internal',
+      soLuongHang: d.soLuongHang || '', donGia: d.donGia || '',
+      ngayNhanHang: d.ngayNhanHang || '', nguoiChi: d.nguoiChi || '',
+      phanLoai: PHAN_LOAI_OPTIONS.includes(d.phanLoai) ? d.phanLoai : 'SX',
+      maChiPhi: d.maChiPhi || 'NY',
+      linkChungTu: d.linkChungTu || '', anhVanDon: d.anhVanDon || '',
+      trangThai: d.trangThai || 'Chờ duyệt', recordId: d.recordId || '',
+    }));
+    setInternationalMode(false);
+    setRows(newRows);
+    setSelectedIds(new Set(newRows.map(r => r.id)));
+    setEditingSubmitted(true);
+    setStep('review');
+    setShowFinder(false);
+    toast.success(`Đã nạp ${newRows.length} lệnh để sửa — chỉnh xong bấm "Cập nhật lên Sheet"`);
+  };
+
+  const updateSubmittedRows = async () => {
+    const selectedRows = rows.filter(r => selectedIds.has(r.id));
+    if (selectedRows.length === 0) { toast.error('Chọn ít nhất 1 dòng'); return; }
+    setIsSyncing(true);
+    let ok = 0; let fail = 0; const failMsgs: string[] = [];
+    for (const row of selectedRows) {
+      try {
+        const res = await fetch('/api/google-sheets/update-row', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ row }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) ok++; else { fail++; failMsgs.push(data?.error || 'lỗi'); }
+      } catch (e: any) { fail++; failMsgs.push(e?.message || 'lỗi'); }
+    }
+    setIsSyncing(false);
+    if (fail === 0) {
+      toast.success(`Đã cập nhật ${ok} dòng lên Google Sheets`);
+      exitEditMode();
+    } else {
+      toast.error(`Cập nhật: ${ok} OK, ${fail} lỗi (${failMsgs[0]}). Kiểm tra Record ID còn trên Sheet không.`);
+    }
+  };
+
+  const exitEditMode = () => {
+    setRows([]);
+    setSelectedIds(new Set());
+    setEditingSubmitted(false);
+    setStep('upload');
   };
 
   const syncToGoogleSheets = async () => {
@@ -1402,7 +1520,16 @@ export default function ExpenseTrackerApp() {
       {/* ====== NAVBAR ====== */}
       <nav className="bg-white border-b border-gray-100 sticky top-0 z-40 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="w-24" />
+          <div className="w-24 flex items-center">
+            <button
+              onClick={openFinder}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-gray-500 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-xs font-medium"
+              title="Sửa / Xoá lệnh đã gửi lên Sheet"
+            >
+              <PenLine className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">Sửa lệnh đã gửi</span>
+            </button>
+          </div>
           <img src="/logo.png" alt="Toys Uncle" className="h-10 object-contain" />
           <div className="flex items-center gap-3 w-24 justify-end">
             {session?.user?.image ? (
@@ -1424,6 +1551,54 @@ export default function ExpenseTrackerApp() {
           </div>
         </div>
       </nav>
+
+      {/* V13: Finder — Sua/Xoa lenh da gui */}
+      {showFinder && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={() => setShowFinder(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-8" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2"><PenLine className="w-5 h-5 text-orange-500" /> Sửa / Xoá lệnh đã gửi</h2>
+              <button onClick={() => setShowFinder(false)} className="text-gray-400 hover:text-gray-700 p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+            </div>
+            <div className="p-5">
+              <div className="flex gap-2 mb-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                  <input value={finderQuery} onChange={e => setFinderQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') loadSyncedEntries(finderQuery); }} placeholder="Tìm theo Mã đơn hàng / mô tả..." className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:border-orange-400 focus:ring-1 focus:ring-orange-400 outline-none" />
+                </div>
+                <button onClick={() => loadSyncedEntries(finderQuery)} className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600">Tìm</button>
+              </div>
+              <p className="text-xs text-gray-400 mb-2">{finderQuery ? 'Kết quả tìm' : 'Các lệnh gửi gần đây nhất'} — tích chọn dòng cần sửa/xoá rồi bấm Mở.</p>
+              <div className="max-h-[50vh] overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-100">
+                {finderLoading ? (
+                  <div className="p-8 text-center text-gray-400 text-sm"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Đang tải...</div>
+                ) : finderResults.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400 text-sm">Không có lệnh nào khớp.</div>
+                ) : finderResults.map((r: any) => (
+                  <label key={r.recordId} className="flex items-center gap-3 p-3 hover:bg-orange-50/40 cursor-pointer">
+                    <input type="checkbox" checked={finderSelected.has(r.recordId)} onChange={() => toggleFinderSelect(r.recordId)} className="w-4 h-4 accent-orange-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="font-mono text-gray-700 shrink-0">{r.chungTuChi || '—'}</span>
+                        <span className="text-gray-300">·</span>
+                        <span className="text-gray-600 truncate">{r.moTaThuongDung || r.dienGiai || '—'}</span>
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">{r.ngayChi || 'chưa có ngày'} · {Number(r.vnd || 0).toLocaleString('vi-VN')}đ · {r.trangThai || '—'}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="p-5 border-t border-gray-100 flex items-center justify-between gap-3">
+              <span className="text-sm text-gray-500">Đã chọn {finderSelected.size}</span>
+              <div className="flex gap-2">
+                <button onClick={() => setShowFinder(false)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Đóng</button>
+                <button onClick={openSelectedForEdit} disabled={finderSelected.size === 0} className="px-5 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed">Mở để sửa ({finderSelected.size})</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Drive Connection Banner */}
       {driveConnected === false && (
@@ -1881,29 +2056,43 @@ export default function ExpenseTrackerApp() {
                 </div>
               </div>
             )}
+            {editingSubmitted && (
+              <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-2">
+                <PenLine className="w-4 h-4 shrink-0" />
+                <span>Đang <b>sửa lệnh đã gửi</b> — chỉnh xong bấm <b>Cập nhật lên Sheet</b> (ghi đè đúng dòng), hoặc bấm 🗑 trên dòng để <b>xoá hẳn</b> khỏi Sheet.</span>
+              </div>
+            )}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
               <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                 <Edit3 className="w-5 h-5 text-orange-500" />
-                Kiểm tra &amp; Chỉnh sửa ({rows.length} dòng)
+                {editingSubmitted ? `Sửa lệnh đã gửi (${rows.length} dòng)` : `Kiểm tra & Chỉnh sửa (${rows.length} dòng)`}
               </h2>
               <div className="flex flex-wrap gap-2">
                 <button onClick={selectAll} className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm transition-all text-gray-600">
                   {selectedIds.size === rows.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
                 </button>
                 <button
-                  onClick={syncToGoogleSheets}
+                  onClick={editingSubmitted ? updateSubmittedRows : syncToGoogleSheets}
                   disabled={isSyncing || selectedIds.size === 0}
                   className="px-5 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all flex items-center gap-2 text-sm font-medium shadow-sm"
                 >
                   {isSyncing ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Đang đồng bộ...</>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> {editingSubmitted ? 'Đang cập nhật...' : 'Đang đồng bộ...'}</>
+                  ) : editingSubmitted ? (
+                    <><Check className="w-4 h-4" /> Cập nhật lên Sheet ({selectedIds.size})</>
                   ) : (
                     <><Check className="w-4 h-4" /> Gửi lên Google Sheets ({selectedIds.size})</>
                   )}
                 </button>
-                <button onClick={resetAll} disabled={isResetting} className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm transition-all text-gray-600 disabled:opacity-50 flex items-center gap-1.5">
-                  {isResetting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang xóa Drive...</> : hasSyncedToSheets ? 'Nhập bill mới' : 'Làm mới'}
-                </button>
+                {editingSubmitted ? (
+                  <button onClick={exitEditMode} disabled={isSyncing} className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm transition-all text-gray-600 disabled:opacity-50">
+                    Thoát
+                  </button>
+                ) : (
+                  <button onClick={resetAll} disabled={isResetting} className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-sm transition-all text-gray-600 disabled:opacity-50 flex items-center gap-1.5">
+                    {isResetting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang xóa Drive...</> : hasSyncedToSheets ? 'Nhập bill mới' : 'Làm mới'}
+                  </button>
+                )}
               </div>
             </div>
 
