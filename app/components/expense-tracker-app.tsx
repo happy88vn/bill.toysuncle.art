@@ -348,12 +348,12 @@ export default function ExpenseTrackerApp() {
 
       const itemTokenSet = new Set(itemTokens);
 
-      // CHOT CHAN MAU: neu ten AI co mau -> MOI mau cua SKU phai nam trong tap mau cua ten AI.
-      // SKU khong duoc "cu the hon": "white" KHONG khop "bone white" (bone khong co trong AI);
-      // nhung "fire engine red" VAN khop "red" (red la mau goc, nam trong tap AI).
-      // SKU khong co mau -> khong chan (every cua mang rong = true).
-      const itemColors = itemTokens.filter(t => realColorWords.has(t));
-      if (aiColors.size > 0 && !itemColors.every(c => aiColors.has(c))) {
+      // CHOT CHAN MAU — KHOP CHINH XAC: tap mau cua SKU phai TRUNG HOAN TOAN tap mau ten AI.
+      // Khong cu the hon ("white" != "bone white"), khong it hon ("fire engine red" != "red").
+      // Lech du 1 chu mau -> bo qua -> giu nguyen ten AI DAY DU de sync chinh xac (y Sep).
+      // San pham khong mau (ca 2 ben rong) -> 2 tap deu rong -> van khop binh thuong.
+      const itemColorSet = new Set(itemTokens.filter(t => realColorWords.has(t)));
+      if (aiColors.size !== itemColorSet.size || ![...itemColorSet].every(c => aiColors.has(c))) {
         continue;
       }
 
