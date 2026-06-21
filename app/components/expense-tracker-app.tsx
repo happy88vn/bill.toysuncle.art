@@ -330,6 +330,12 @@ export default function ExpenseTrackerApp() {
       for (const w of tokenize(k)) colorWords.add(w);
       for (const v of vals) for (const w of tokenize(v)) colorWords.add(w);
     }
+    // realColorWords = mau thuc su (bo tu chung "mau") -> dung de bat XUNG DOT mau.
+    const realColorWords = new Set(colorWords);
+    realColorWords.delete('mau');
+
+    // Mau co trong ten AI (vd "fire engine red" -> red, do, fire, tuoi, lua...).
+    const aiColors = new Set(aiTokens.filter(t => realColorWords.has(t)));
 
     let bestMatch: SkuItem | null = null;
     let bestScore = 0;
@@ -341,6 +347,13 @@ export default function ExpenseTrackerApp() {
       if (itemTokens.length === 0) continue;
 
       const itemTokenSet = new Set(itemTokens);
+
+      // CHOT CHAN MAU: neu CA ten AI lan SKU deu co mau ma KHONG mau nao trung
+      // -> mau xung dot (vd "PLA+ do/trang" KHONG duoc khop SKU "PLA+ den") -> bo qua.
+      const itemColors = itemTokens.filter(t => realColorWords.has(t));
+      if (aiColors.size > 0 && itemColors.length > 0 && !itemColors.some(c => aiColors.has(c))) {
+        continue;
+      }
 
       // Chi dem token SAN PHAM (khong phai mau) trung nhau.
       let productMatchCount = 0;
