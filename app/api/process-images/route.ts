@@ -28,6 +28,7 @@ BẮT BUỘC: Kết quả đầu ra phải là một JSON **Array** (mảng). M�
 - **SoTienGoc của MỖI Object = GIÁ LISTING RIÊNG của dòng đó** (số cạnh sản phẩm). TUYỆT ĐỐI KHÔNG chia đều, KHÔNG dùng tổng bill — giá mỗi sản phẩm THƯỜNG KHÁC NHAU.
 - **TongThanhToan = số "Thành tiền"/"Tổng thanh toán" thực trả của CẢ hóa đơn**, GHI GIỐNG NHAU cho MỌI Object. BẮT BUỘC điền nếu nhìn thấy — KỂ CẢ bill chỉ có 1 sản phẩm. Backend tự phân bổ giảm giá theo TỶ LỆ giá trị từng dòng để ra đơn giá thực. Chỉ khi thật sự không có dòng tổng riêng → TongThanhToan = tổng các dòng.
 - SoLuongHang = số lượng riêng của dòng đó. DienGiai = tên sản phẩm CỤ THỂ (đọc đúng tên trên bill).
+- ⚠️ GIỮ NGUYÊN TÊN MÀU / PHIÊN BẢN ĐẦY ĐỦ y như in trên bill — TUYỆT ĐỐI KHÔNG rút gọn về màu gốc. VD: "Fire Engine Red" PHẢI giữ là "Fire Engine Red" (KHÔNG ghi "Red"); "Bone White" giữ "Bone White" (KHÔNG ghi "White"); "Matcha Green" giữ "Matcha Green" (KHÔNG ghi "Green"); "Space Blue" giữ "Space Blue". Tên màu nhiều chữ là một KHỐI, chép trọn.
 - Dùng TÊN CỬA HÀNG + hình ảnh sản phẩm để hiểu đúng mặt hàng rồi đặt DienGiai cho chuẩn. VD cửa hàng "Sơn Duy Auto Win" + hình các hộp/lọ sơn → đây là SƠN nhiều loại/màu → "Sơn lót 2K trắng", "Sơn lót 2K đen"...
 - VÍ DỤ BILL 1 SẢN PHẨM (Shopee): cửa hàng "Kmart Store", "Ổ cắm WIFI TP-Link Tapo P110M", giá gạch ngang 399.000đ, giá 295.000đ, Thành tiền 257.200đ → 1 Object: {DienGiai:"Ổ cắm WIFI Tapo P110M", SoTienGoc:"295000", TongThanhToan:"257200", SoLuongHang:"1", LoaiTien:"VND"}. (Backend ra đơn giá thực = 257.200, KHÔNG phải 295.000.)
 - VÍ DỤ NHIỀU SẢN PHẨM: Bill "Sơn Duy Auto Win", Thành tiền 340.300đ, gồm Sơn lót trắng x1 (150.000đ), Sơn lót đen x1 (150.000đ), Sơn DD75 x1 (60.000đ), Sơn mờ x1 (50.000đ) → 4 Object: SoTienGoc lần lượt "150000","150000","60000","50000", TongThanhToan="340300" cho cả 4. (Backend tự ra đơn giá sau giảm 124500/124500/49800/41500.)
@@ -62,7 +63,7 @@ Mỗi object trong mảng phải có chính xác các key sau:
 
 "ChungTuMuaHang": Mã đơn hàng, Mã giao dịch, Mã vận đơn. Nếu không có → "".
 
-"DienGiai": Tên sản phẩm/dịch vụ CỤ THỂ cho dòng này. Dưới 15 chữ.
+"DienGiai": Tên sản phẩm/dịch vụ CỤ THỂ cho dòng này. Ngắn gọn nhưng PHẢI GIỮ NGUYÊN tên màu/phiên bản ĐẦY ĐỦ như in trên bill (vd "ESUN PLA+ Fire Engine Red" — KHÔNG rút thành "Red"). Ưu tiên đủ-đúng-màu hơn là ngắn; tối đa ~10 từ.
 
 "SoTienGoc": Số tiền GỐC của dòng này theo đơn vị tiền tệ trên hóa đơn. (Chỉ ghi số, có thể âm cho voucher). Nếu là VND → ghi số nguyên (46420, KHÔNG phải 46.42).
 
